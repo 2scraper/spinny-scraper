@@ -1,0 +1,131 @@
+name: Bug report
+description: The scraper ran but the result was wrong, empty, or it crashed.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before anything else: never paste an API key, a proxy password or a
+        full `ws://user:pass@...` endpoint into a public issue.** The scrapers
+        mask credentials in their own logs, but raw HTML dumps and the Scraper
+        API's `x-debug` header do not. Replace them with `***`.
+
+        Four things answer most reports faster than we can:
+
+        - **Zero cars, exit 4?** Check the URL for a CITY. Spinny scopes its
+          inventory by city, so `/used-suv-cars/s/` serves the grid container
+          empty — under a heading advertising the national total — while
+          `/used-suv-cars-in-delhi-ncr/s/` works. `/used-cars` with no `/s/`
+          is an SEO landing page with no grid at all. Both answer 200, and
+          both are correct answers rather than faults. See
+          [TROUBLESHOOTING.md](../blob/main/TROUBLESHOOTING.md).
+        - **`--pages 5` returned about 20 cars, or `?page=2` gave you page
+          1?** Spinny IGNORES `?page=N`. A listing is one infinitely
+          scrolling page, so `--pages N` means N batches of 20 reached by
+          scrolling — and `--concurrency` above 1 is refused for the same
+          reason.
+        - **`rating` and `review_count` empty on every row?** Expected.
+          Spinny publishes no car-level rating anywhere; the inspection
+          scores on a detail page are about different parts of one car.
+        - **Exit 3?** Suspect the access path before the site. No Spinny
+          refusal has ever been observed, from a home connection, a
+          datacentre exit, a residential exit or the Scraping Browser API. A
+          response that does not reference `assets.spinny.com` is usually
+          Chromium's own error page behind a dead proxy — it carries the
+          site's hostname in its `<title>`, so it looks real.
+
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Which engine
+      options:
+        - playwright_scraper.py
+        - puppeteer_scraper.py
+        - selenium_scraper.py
+        - scraper_api_client.py
+        - fingerprint_client.py
+        - other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: browser_route
+    attributes:
+      label: How was the browser reached
+      options:
+        - A browser the script launched itself
+        - A remote browser over --cdp-endpoint
+        - No browser (scraper_api_client.py over plain HTTP)
+        - Not applicable
+    validations:
+      required: true
+
+  - type: input
+    id: exit_code
+    attributes:
+      label: Exit code
+      description: >-
+        `echo $?` straight after the run. These mean specific things — 3 is a
+        challenge page, 4 is "ran fine, found nothing", 124 is a self-imposed
+        timeout. The table is in the README.
+      placeholder: "4"
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: The exact command
+      description: With credentials replaced by `***`.
+      render: shell
+      placeholder: |
+        python3 playwright_scraper.py \
+          --url "https://www.spinny.com/used-cars-in-delhi-ncr/s/" \
+          --pages 3 --out delhi
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: >-
+        The whole run, not just the last line — the useful detail is usually
+        upstream of the error. Credentials replaced by `***`.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+      placeholder: >-
+        96 products, as the README says a category page yields.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Please run and paste:
+        ```
+        python3 -c "import sys, platform; print(sys.version, platform.platform())"
+        pip list 2>/dev/null | grep -Ei "playwright|pyppeteer|selenium|beautifulsoup4|requests|webdriver"
+        python3 smoke_test.py | tail -3
+        ```
+      render: text
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: The offline suite passes on my machine (`python3 smoke_test.py`)
+          required: true
+        - label: I removed every API key, password and credentialled URL from this report
+          required: true
