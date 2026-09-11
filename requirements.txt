@@ -1,16 +1,21 @@
-# Core — install at least one browser engine:
-playwright>=1.40.0
-# selenium>=4.15.0
-# pyppeteer>=2.0.0
+# spinny-scraper — core dependencies
+#
+#   pip install -r requirements.txt
+#
+# Needed by everything, including the two browserless clients
+# (scraper_api_client.py, fingerprint_client.py) and the offline test suite.
+beautifulsoup4>=4.12.0
+requests>=2.31.0
 
-# For direct API mode (recommended — no browser needed):
-httpx>=0.27.0
-# or: requests>=2.31.0  (for Selenium sync version)
-
-# Optional: Selenium auto-driver management
-webdriver-manager>=4.0.0
-# Optional: Selenium network interception
-# selenium-wire>=5.1.0
-
-# CAPTCHA solving via 2captcha.com
-2captcha-python>=1.3.0
+# Then install exactly ONE engine — see the file per engine:
+#
+#   pip install -r requirements-playwright.txt && playwright install chromium
+#   pip install -r requirements-selenium.txt
+#   pip install -r requirements-puppeteer.txt
+#
+# Install one, not all three. playwright and pyppeteer declare mutually
+# unsatisfiable pins (pyee <12 vs >=13), and pyppeteer and selenium collide on
+# urllib3 (<2.0 vs >=2.6). All four do run side by side in practice, because
+# neither library touches the incompatible part — but `pip check` will report
+# the conflict, and pip may resolve it by downgrading something you wanted.
+# If you genuinely need more than one engine, use a virtualenv per engine.

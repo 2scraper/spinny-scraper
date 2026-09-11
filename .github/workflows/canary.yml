@@ -1,0 +1,378 @@
+name: canary
+
+# tests.yml (deliberately) never touches spinny.com — see its own header for
+# why. That leaves a real gap: a markup change on the site itself only shows
+# up when a user hits it and files an issue, while the offline badge stays
+# green throughout. This workflow is the other half — a real run against a
+# real listing URL — so a site-side break is caught here first.
+#
+# THIS CANARY RUNS FROM A BARE RUNNER, WITH NO SECRET.
+# ------------------------------------------------------------------------
+# That is unusual in this family and it is measured rather than hoped for.
+# Every sibling repo's canary is gated on a credential because its site
+# refuses a datacentre address; Spinny refuses nothing. Measured 2026-09-11:
+#
+#   local Chromium, home connection, no key, no proxy    62 cars, exit 0
+#   Amsterdam datacentre exit                            full grid
+#   Chennai residential exit                             full grid
+#   Scraping Browser API (--cdp-endpoint)                62 cars, exit 0
+#
+# So this canary is scheduled rather than dispatch-only, and it needs nothing
+# configured to be useful. If SPINNY_CDP_ENDPOINT IS set it is used — that
+# exercises the paid path too — and if it is not, the run goes ahead from the
+# runner's own address. Either way the assertions below are the same.
+#
+# The secret, when present, is passed through the ENVIRONMENT, which
+# env_config.py reads for exactly this variable, rather than through a
+# --cdp-endpoint flag. A credential on a command line is readable by anything
+# that can run `ps`, which is the rule this repo states and should therefore
+# follow in its own CI; and an unset secret arrives as an empty string, which
+# the loader already treats as "not configured", so one line is correct with
+# and without it.
+#
+# If you do set it, use a `pid` reserved for CI. A profile allows ONE live
+# connection, so a canary sharing a pid with a person's run gets
+# `profile_locked` (exit 5), which says nothing about the site or the code.
+on:
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  live-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the Playwright engine
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-playwright.txt
+          playwright install --with-deps chromium
+
+      - name: Scrape a real, known-good city listing
+        id: run
+        # --pages 3, not 1. On this site a "page" is a BATCH OF 20 reached by
+        # scrolling — ?page=N is silently ignored and returns page 1 — so
+        # asking for one batch would exercise only the first paint and leave
+        # the lazy-load loop, which is the only reason there are rows at all,
+        # completely untested. Three batches makes the scroll run.
+        #
+        # A CITY listing rather than a filtered one: a filter can empty out
+        # (the site's own zero-result page is a correct answer, and a canary
+        # that goes red because a make sold out is a canary nobody reads),
+        # while Delhi NCR has advertised between 1546 and 1566 cars across
+        # runs minutes apart.
+        #
+        # set +e: GitHub Actions runs `run:` steps as `bash -e`, so without
+        # this a non-zero scraper exit aborts the script on THAT line and the
+        # `echo "exit_code=$?"` below never runs. continue-on-error only stops
+        # the step from failing the job; it does not touch the shell's errexit.
+        continue-on-error: true
+        env:
+          SPINNY_CDP_ENDPOINT: ${{ secrets.SPINNY_CDP_ENDPOINT }}
+          TWOCAPTCHA_KEY: ${{ secrets.TWOCAPTCHA_KEY }}
+        run: |
+          set +e
+          python3 playwright_scraper.py \
+            --url "https://www.spinny.com/used-cars-in-delhi-ncr/s/" \
+            --pages 3 --retries 4 --out canary_run --dump-html canary_run.html
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Interpret the exit code
+        id: verdict
+        # ACCESS CONDITIONS ARE NOT DEFECTS — but on THIS site almost nothing
+        # is an access condition, which changes what the badge means.
+        #
+        # A sibling repo's canary treats exit 3 as a warning because its site
+        # refuses datacentre addresses as a matter of course. Spinny has never
+        # been observed refusing anything, from any exit tested, so a blocked
+        # run here is NEW INFORMATION and is failed rather than excused. If
+        # that turns out to be wrong — if runners start being refused — the
+        # honest fix is to change this and say why, not to leave a check that
+        # is amber whatever happens.
+        #
+        # Exit 5 stays a warning: it can only happen when the optional
+        # Scraping Browser secret is set, and `profile_locked` says nothing
+        # about the site.
+        run: |
+          set -e
+          code="${{ steps.run.outputs.exit_code }}"
+          tested=true
+          case "$code" in
+            0)
+              echo "OK — cars parsed from a live run." ;;
+            5)
+              tested=false
+              echo "::warning::Remote API error (exit 5) — the optional Scraping Browser endpoint refused the connection, so nothing was tested and this run is not failed. If the log says 'profile_locked', another run still holds this pid: give CI its own. Otherwise the SPINNY_CDP_ENDPOINT secret has most likely expired — remove it and this canary goes back to running from the runner's own address, which works on this site."
+              echo "### Canary did NOT test anything (exit 5, endpoint refused)" >> "$GITHUB_STEP_SUMMARY"
+              echo "The optional \`SPINNY_CDP_ENDPOINT\` secret is set and did not authenticate. This canary does not need it." >> "$GITHUB_STEP_SUMMARY" ;;
+            3)
+              echo "::error::Blocked before parsing (exit 3). On this site that is NEW: no Spinny refusal has ever been observed, from a home connection, an Amsterdam datacentre exit, a Chennai residential exit or the Scraping Browser API. Check the byte count in the debug dump — 0 bytes means nothing came back at all, and a page that does not reference assets.spinny.com is Chromium's own error page rather than an interstitial. Either the site has started scoring addresses, or the runner's network is broken."
+              echo "### Blocked (exit 3) — new behaviour for this site" >> "$GITHUB_STEP_SUMMARY"
+              echo "Spinny has not been observed refusing any exit. Read the dump before assuming it is the runner." >> "$GITHUB_STEP_SUMMARY"
+              exit 1 ;;
+            6)
+              echo "::error::Partial run (exit 6) — the scroll budget ran out with the grid still growing and 60 cars not yet reached. The measured run needs two scroll rounds to pass 60, so this means the lazy-load loop is not making progress: the grid container or the card anchor has moved, or the site has slowed down a great deal."
+              exit 1 ;;
+            4)
+              echo "::error::Ran fine but parsed 0 rows (exit 4) on a listing that advertises over 1500 cars. Either the grid container ([data-id=landing-plp-container]) or the card anchor (a[href^=/buy-used-cars/]) has moved — this is the regression this canary exists to catch. The HTML dump in the artefacts tells you which."
+              exit 1 ;;
+            2)
+              echo "::error::Bad usage (exit 2) — the workflow's own arguments are wrong, not the site."
+              exit 1 ;;
+            *)
+              echo "::error::Unexpected exit code $code (see the step above for the traceback)."
+              exit 1 ;;
+          esac
+          echo "tested=$tested" >> "$GITHUB_OUTPUT"
+
+      - name: Sanity-check the scraped data
+        if: steps.verdict.outputs.tested == 'true'
+        # Exit 0 only means "some rows were written". It says nothing about
+        # whether the page actually rendered: a snapshot taken too early
+        # still writes rows, just with fields empty. Every floor below is set
+        # from a measured figure and deliberately under it, so this fails on
+        # a collapse rather than on normal variation.
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          from pathlib import Path
+
+          BATCHES_REQUESTED = 3
+          # Measured 2026-09-11: --pages 3 returned 62 cars, three times,
+          # through three different engines. The floor is two batches' worth,
+          # so a slow round cannot trip it.
+          MIN_ROWS = 40
+          # 705 of 705 cards across three captures carried a price, and
+          # 62/62 on every live run. Every card prints one.
+          MIN_PRICED_SHARE = 0.98
+
+          rows = json.loads(Path("canary_run.json").read_text())
+          meta = json.loads(Path("canary_run.meta.json").read_text())
+          fail = []
+
+          if len(rows) < MIN_ROWS:
+              fail.append(f"only {len(rows)} rows, expected at least {MIN_ROWS} "
+                          f"from {BATCHES_REQUESTED} batches of 20")
+
+          skus = [r.get("sku") for r in rows]
+          if len(set(skus)) != len(skus):
+              fail.append(f"{len(skus) - len(set(skus))} duplicate sku(s) — one "
+                          f"scrolled page can re-render a card as it hydrates, "
+                          f"and the writer is meant to drop the repeats")
+
+          priced = sum(1 for r in rows if r.get("price") is not None)
+          if rows and priced / len(rows) < MIN_PRICED_SHARE:
+              fail.append(f"only {priced}/{len(rows)} rows have a price "
+                          f"(floor {MIN_PRICED_SHARE:.0%}) — every card prints "
+                          f"one, so this means the price node moved")
+
+          # THERE IS NO STRUCTURED-PRICE CONFIRMATION SHARE TO CHECK, and that
+          # absence is measured rather than an omission: a Spinny LISTING page
+          # carries five JSON-LD blocks and not one of them names a car. So
+          # `price_source` is "dom+attr" on every listing row, and a
+          # confirmation floor copied from a sibling repo would fail every run.
+          sources = {r.get("price_source") for r in rows}
+          if sources - {"dom+attr", "dom"}:
+              fail.append(f"listing rows carry price_source {sorted(sources)} — "
+                          f"only 'dom+attr' and 'dom' are possible on a listing "
+                          f"page here")
+
+          # THE CHECK THIS SITE ACTUALLY NEEDS. Two price BASES: the displayed
+          # figure excludes RC transfer and insurance, the site's own
+          # data-price attribute includes them, so the attribute was the
+          # HIGHER of the two on 482 of 482 measured cards and 62 of 62 on
+          # every live run. A row where it is lower means the two reads have
+          # been crossed — which computes a negative discount and still looks
+          # entirely plausible in the output.
+          pairs = [(r["price"], r["price_all_in"]) for r in rows
+                   if r.get("price") is not None
+                   and r.get("price_all_in") is not None]
+          crossed_basis = [p for p, a in pairs if a < p]
+          if pairs and len(crossed_basis) / len(pairs) > 0.02:
+              fail.append(f"{len(crossed_basis)}/{len(pairs)} rows have an "
+                          f"all-in price BELOW the displayed one — the two "
+                          f"price bases have been crossed")
+          if len(pairs) < 0.9 * len(rows):
+              fail.append(f"only {len(pairs)}/{len(rows)} rows carry both price "
+                          f"bases — the data-price attribute is measured on "
+                          f"705 of 705 cards, so this means it moved")
+
+          # Fields that were fully populated on the measured runs. Any of them
+          # collapsing means an anchor moved.
+          for field, floor in (("title", 0.98), ("sku", 1.0), ("url", 1.0),
+                               ("brand", 0.95), ("model", 0.95),
+                               ("variant", 0.95), ("year", 0.95),
+                               ("currency", 0.98), ("category", 1.0),
+                               ("km_driven", 0.95), ("fuel_type", 0.95),
+                               ("transmission", 0.95), ("rto", 0.95),
+                               ("assurance", 0.95), ("emi_monthly", 0.90),
+                               ("image_url", 0.98),
+                               ("page", 1.0), ("position", 1.0)):
+              got = sum(1 for r in rows if r.get(field) not in (None, ""))
+              if rows and got / len(rows) < floor:
+                  fail.append(f"{field} present on only {got}/{len(rows)} rows "
+                              f"(floor {floor:.0%})")
+
+          # `hub` IS EXPECTED TO BE SPARSE — 10 of 705 cards print none — so
+          # the floor is well under 100%. A floor near it would fail healthy
+          # runs; no floor at all would miss the column emptying.
+          hubs = sum(1 for r in rows if r.get("hub"))
+          if rows and hubs / len(rows) < 0.80:
+              fail.append(f"hub present on only {hubs}/{len(rows)} rows — "
+                          f"about 2% of cards legitimately print none, so this "
+                          f"low means the hub read has broken")
+
+          # ...and so is `original_price`: 20 of 705 cards carry no strike,
+          # and those same 20 carry no discount badge. The two travel
+          # together, so a row with one and not the other is a parsing fault.
+          mismatched = [r.get("sku") for r in rows
+                        if (r.get("original_price") is None)
+                        != (r.get("discount_amount") is None)]
+          if len(mismatched) > 0.10 * max(len(rows), 1):
+              fail.append(f"{len(mismatched)} row(s) have a strike price "
+                          f"without the site's own discount figure or the "
+                          f"reverse: {mismatched[:3]}")
+
+          # Null on every row of every run, measured across 705 cards and one
+          # detail page: Spinny publishes no car-level rating and no per-car
+          # review count. If either starts filling up, something is reading
+          # Spinny's OWN aggregate rating into a car's row.
+          for field in ("rating", "review_count"):
+              got = sum(1 for r in rows if r.get(field) is not None)
+              if got:
+                  fail.append(f"{got}/{len(rows)} rows have `{field}` — the "
+                              f"site publishes none per car, so this is "
+                              f"probably the marketing block's rating of "
+                              f"SPINNY being read into a car")
+
+          # Detail-only columns must stay null on a listing run, or a listing
+          # row is claiming facts only a car's own page states.
+          for field in ("km_driven_exact", "owners", "registration_year",
+                        "registration_month", "color", "seating_capacity",
+                        "insurance_validity", "insurance_type", "in_stock"):
+              got = sum(1 for r in rows if r.get(field) is not None)
+              if got:
+                  fail.append(f"{got}/{len(rows)} listing rows have `{field}`, "
+                              f"which only --mode detail can know")
+
+          # THE INVARIANT, one line, and it catches a whole class forever. An
+          # original_price at or below the price means the sale price and the
+          # was-price are being read out of the wrong nodes — which is what a
+          # second KIND of struck-through price would produce, the way an EU
+          # Omnibus 30-day low did in a sibling repo.
+          crossed = [r["sku"] for r in rows
+                     if r.get("original_price") and r.get("price")
+                     and r["original_price"] <= r["price"]]
+          if crossed:
+              fail.append(f"{len(crossed)} row(s) have an original_price at or "
+                          f"below their price: {crossed[:3]} — the sale price "
+                          f"and the strikethrough are being confused")
+          bad_discount = [r["sku"] for r in rows
+                          if r.get("discount_pct") is not None
+                          and not (0 < r["discount_pct"] < 100)]
+          if bad_discount:
+              fail.append(f"{len(bad_discount)} row(s) have a discount outside "
+                          f"(0, 100): {bad_discount[:3]}")
+
+          # `sku` is the car's numeric id and the last segment of its own URL.
+          # If that changes, every downstream join breaks silently.
+          bad_sku = [r.get("sku") for r in rows
+                     if not (r.get("sku") or "").isdigit()
+                     or (r.get("url") or "").rstrip("/").rsplit("/", 1)[-1]
+                     != r.get("sku")]
+          if bad_sku:
+              fail.append(f"{len(bad_sku)} sku(s) are not the car's numeric id "
+                          f"from its own URL: {bad_sku[:3]}")
+
+          # `page` and `position` TOGETHER have to identify a row. This run
+          # fetches ONE URL and reports batches through `page`, so a failure
+          # to thread the batch number in would give every row page 1 and a
+          # position another row already has — which a sibling repo shipped.
+          keys = [(r.get("page"), r.get("position")) for r in rows]
+          if len(set(keys)) != len(keys):
+              fail.append(f"{len(keys) - len(set(keys))} row(s) share a "
+                          f"(page, position) pair — the scroll's batch "
+                          f"boundaries are not reaching the parser")
+
+          # One currency per run, always INR. The site sells in one country —
+          # measured identical from two exit countries — so more than one
+          # currency here means something is inventing them.
+          currencies = {r.get("currency") for r in rows if r.get("currency")}
+          if currencies - {"INR"}:
+              fail.append(f"rows carry a currency other than INR "
+                          f"({sorted(currencies)}) — this site quotes one")
+
+          # The point of asking for more than one batch. `pages_completed`
+          # counts batches of 20 that the run HOLDS.
+          if meta.get("pages_completed", 0) < BATCHES_REQUESTED:
+              fail.append(f"the run holds {meta.get('pages_completed')} batches "
+                          f"of the {BATCHES_REQUESTED} requested (stop_reason="
+                          f"{meta.get('stop_reason')!r}) — the lazy-load scroll "
+                          f"is not reaching further into the grid, and this "
+                          f"site publishes no pagination to fall back on")
+          batches_seen = {r.get("page") for r in rows}
+          if len(batches_seen) < 2:
+              fail.append(f"every row claims batch {sorted(batches_seen)} — the "
+                          f"scroll's boundaries are not being recorded, so the "
+                          f"`page` column means nothing")
+          if meta.get("status") != "complete":
+              fail.append(f"run status is {meta.get('status')!r}, not 'complete'")
+          if meta.get("mode") != "listing":
+              fail.append(f"run mode is {meta.get('mode')!r}, not 'listing'")
+
+          # THE SCROLL IS THE ONLY REASON THERE ARE ROWS AT ALL on this site:
+          # the first response is a shell with zero cars in it.
+          scroll = meta.get("scroll") or {}
+          if not scroll:
+              fail.append("the sidecar records no scroll at all — the lazy-load "
+                          "loop did not run, and on this site that means the "
+                          "grid never hydrated")
+          elif not (scroll.get("settled") or scroll.get("reached_target")):
+              fail.append("the scroll neither settled nor reached its target, "
+                          "so this run is a floor rather than the listing")
+
+          # COMPLETENESS IS ARITHMETIC HERE because Spinny prints its own
+          # total. The number itself moves between runs (1546 and 1566 eleven
+          # minutes apart), so what is asserted is that it EXISTS and is
+          # sane — not its value.
+          comp = meta.get("completeness") or {}
+          advertised = comp.get("total_available")
+          if advertised is None:
+              fail.append("the listing's own advertised total was not read — "
+                          "the heading node ([data-componentname=HeadingContent]) "
+                          "has moved, and with it the completeness check")
+          elif advertised < len(rows):
+              fail.append(f"the site advertises {advertised} cars and this run "
+                          f"holds {len(rows)} — the total is being read from "
+                          f"the wrong node")
+
+          for line in fail:
+              print(f"::error::{line}")
+          print(f"[canary] {len(rows)} rows, {priced} priced, "
+                f"{hubs} with a hub, advertised {advertised}, "
+                f"status {meta.get('status')!r}, "
+                f"stop_reason {meta.get('stop_reason')!r}")
+          sys.exit(1 if fail else 0)
+          EOF
+
+      - name: Upload what the run produced
+        # On EVERY run, not only on failure: a green canary's artefacts are
+        # what the next investigation compares against.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-artefacts
+          path: |
+            canary_run.json
+            canary_run.csv
+            canary_run.meta.json
+            canary_run.html*
+            canary_run_page*_debug.html
+          if-no-files-found: ignore
+          retention-days: 14
