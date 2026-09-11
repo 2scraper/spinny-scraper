@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spinny-scraper"
-version = "0.1.0"
+version = "0.1.1"
 description = "Spinny scraper: used-car city listings, filtered listings and car detail pages."
 readme = "README.md"
 license = "MIT"

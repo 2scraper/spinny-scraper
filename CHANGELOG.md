@@ -11,6 +11,31 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ---
 
+## [0.1.1] — 2026-09-11
+
+### Fixed
+
+- **`fingerprint_client.py` read `--key`'s default straight from
+  `os.environ`, which skips the placeholder rule.** The `.env` half of this
+  was already fixed in 0.1.0 — found the first time `--fingerprint` was run
+  live here — but with `env_config.apply()` AFTER parsing, which leaves the
+  argparse default reading the environment directly. So an exported
+  placeholder still reached the API.
+
+  Measured with `TWOCAPTCHA_KEY=your_2captcha_api_key_here` exported: the old
+  path reported "Fingerprint API rejected the key (401) — note this is a
+  separate subscription", sending the reader off to check a subscription they
+  never needed; the loader says "still set to the placeholder from
+  .env.example" instead.
+
+  This converges the repo onto the shape the whole family now shares. The
+  same defect, in its `.env` form, was found in five sibling repos in the
+  same pass and fixed there — farfetch 0.4.3, amazon 0.1.3, mediamarkt
+  0.1.8, etsy 0.2.2, tokopedia 0.1.4 — and the check that pins it is
+  byte-identical in all seven.
+
+---
+
 ## [0.1.0] — 2026-09-11
 
 First release as a member of the [2scraper](https://github.com/2scraper)
@@ -197,4 +222,5 @@ at all. It is kept because it is family core and is the right tool on sites
 whose grid is server-rendered — and because family core that exists in five
 repos and is exercised in four is how untested inheritance ships.
 
+[0.1.1]: https://github.com/2scraper/spinny-scraper/releases/tag/v0.1.1
 [0.1.0]: https://github.com/2scraper/spinny-scraper/releases/tag/v0.1.0
