@@ -287,6 +287,15 @@ Every run writes `<out>.meta.json` beside the data: `status`, `stop_reason`,
 heading and the completeness arithmetic. A **failed** run writes no sidecar —
 it would contradict the previous good data still sitting there.
 
+`stop_reason` on a listing run is one of four, and the last two are `partial`:
+
+| `stop_reason` | Means |
+|---|---|
+| `completed` | the batches `--pages` asked for were gathered |
+| `no_new_products` | the grid stopped growing **and the site's own count agrees** the listing ran out |
+| `scroll_stalled` | the grid stopped growing while the site still advertises far more — the lazy load stalled, it did not finish |
+| `scroll_budget_exhausted` | the round budget ran out with the grid still growing |
+
 ---
 
 ## Traps that look like bugs
@@ -371,6 +380,22 @@ per `pid`; a second concurrent run on the same profile gets a 500
 single run. `--proxy-file` with `--proxy-rotate per-page` relaunches the
 browser on each rotation, because replaying a bot manager's cookies from a
 second address is a stronger signal than either address alone.
+
+Verified 2026-09-11 through 2Captcha's residential gateway on an Indian exit
+(Palghar, Maharashtra): 62 cars, 100% price coverage, identical to the direct
+run. Two things are worth knowing before you use one here:
+
+* **Chromium cannot authenticate a SOCKS5 proxy**, so a `socks5://user:pass@…`
+  entry is refused with exit 2 rather than sent with its credentials silently
+  dropped. If your gateway is SOCKS5, terminate the credentials in a local
+  HTTP hop and point `--proxy` at that.
+* **A rotating gateway can stall the lazy load.** Every request leaves from a
+  different address, so the hydration XHR for the next batch sometimes never
+  lands and the grid stops growing early — 22 cars on one run, 62 on the
+  next against the same URL. The run reports that honestly as
+  `scroll_stalled` (status `partial`, exit 6) rather than as a complete run
+  holding a fraction, because the site's own advertised total says the
+  listing had not run out. A sticky session avoids it.
 
 **Fingerprints** (`--fingerprint`) buy a consistent device identity — the UA,
 locale, timezone, screen and device pixel ratio all agreeing with one another

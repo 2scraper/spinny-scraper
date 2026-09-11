@@ -1183,6 +1183,44 @@ def test_page_flow():
     ok &= check("no advertised total means short_by is None, not zero",
                 comp["total_available"] is None and comp["short_by"] is None)
 
+    # THE RUN STATUS, in one place for all three engines — and the case that
+    # matters was found by a live run rather than by reading the code.
+    #
+    # Through a rotating residential gateway the grid stopped growing at 22
+    # cars, because every request leaves from a different address and the
+    # hydration XHR for the second batch never landed. The scroll did exactly
+    # what it is told to do, and the run reported COMPLETE while holding 22
+    # of an advertised 1546 — with `short_by: 1524` in the same sidecar
+    # contradicting it.
+    settled = {"settled": True, "reached_target": False}
+    ok &= check("a settled scroll the site's own count agrees with is "
+                "complete",
+                page_flow.listing_stop_reason(settled, {"total_available": 40},
+                                              40) == "no_new_products")
+    ok &= check("...but a settled scroll far below the advertised total is a "
+                "STALL, not an exhausted listing",
+                page_flow.listing_stop_reason(settled,
+                                              {"total_available": 1546}, 22)
+                == "scroll_stalled")
+    ok &= check("...and scroll_stalled is NOT a complete stop reason",
+                "scroll_stalled" not in COMPLETE_STOP_REASONS)
+    ok &= check("where the site advertises no total, a settled scroll still "
+                "reads as exhausted — there is nothing better to judge by",
+                page_flow.listing_stop_reason(settled, {"total_available": None},
+                                              22) == "no_new_products")
+    ok &= check("reaching the batches that were asked for is complete",
+                page_flow.listing_stop_reason(
+                    {"settled": False, "reached_target": True},
+                    {"total_available": 1546}, 62) == "completed")
+    ok &= check("a spent round budget is partial",
+                page_flow.listing_stop_reason(
+                    {"settled": False, "reached_target": False},
+                    {"total_available": 1546}, 182)
+                == "scroll_budget_exhausted")
+    ok &= check("no scroll at all is not silently complete",
+                page_flow.listing_stop_reason(None, None, 0)
+                == "scroll_budget_exhausted")
+
     # The retry budget, computed in ONE place so the engines cannot disagree
     # — and so RETRY_ON_BLOCKED has a reader rather than a paragraph of
     # justification nobody consults.
@@ -1997,7 +2035,8 @@ def test_single_fetch_run(skips):
         category = None
         delay = 0
 
-    def run(scroll, rows=3, mode="listing", concurrency=1, ok_page=True):
+    def run(scroll, rows=3, mode="listing", concurrency=1, ok_page=True,
+            advertised=3):
         fetched = []
         sessions = []
 
@@ -2007,10 +2046,10 @@ def test_single_fetch_run(skips):
             outcome.final_url = url
             outcome.state = "content"
             outcome.scroll = scroll
-            outcome.completeness = {"total_available": 1559,
+            outcome.completeness = {"total_available": advertised,
                                     "rows_collected": rows,
-                                    "short_by": 1559 - rows}
-            outcome.header = "1559 Used cars in Delhi NCR"
+                                    "short_by": max(0, advertised - rows)}
+            outcome.header = "%d Used cars in Delhi NCR" % advertised
             if not ok_page:
                 outcome.blocked_by = "not-served"
                 return outcome
@@ -2057,9 +2096,10 @@ def test_single_fetch_run(skips):
     ok &= check("the browser session is always closed",
                 all(s.closed for s in sessions))
 
-    # 2. THE STATUS MAPPING. A grid that stopped growing is the listing
-    #    itself running out — the DATA-based terminating condition — and that
-    #    is a COMPLETE run.
+    # 2. THE STATUS MAPPING. A grid that stopped growing WITH THE SITE'S OWN
+    #    COUNT AGREEING is the listing running out — the DATA-based
+    #    terminating condition — and that is a COMPLETE run. The run stubbed
+    #    here advertises 1559 and holds 1559.
     ok &= check("a settled scroll reports no_new_products",
                 meta and meta["stop_reason"] == "no_new_products")
     ok &= check("...and the run is complete", meta and meta["status"] == "complete")
@@ -2068,15 +2108,27 @@ def test_single_fetch_run(skips):
     ok &= check("pages_completed counts the batches the run holds",
                 meta and meta["pages_completed"] == 1)
     ok &= check("the sidecar carries the arithmetic completeness check",
-                meta and meta["completeness"]["short_by"] == 1556)
+                meta and meta["completeness"]["short_by"] == 0)
     ok &= check("...and the listing's own heading",
-                meta and meta["listing_heading"].startswith("1559 Used cars"))
+                meta and meta["listing_heading"].endswith("Used cars in Delhi NCR"))
+
+    # THE STALL, which a live run through a rotating residential gateway
+    # produced: the grid stops growing because the hydration XHR never lands,
+    # and without this the run reports COMPLETE while holding 22 of 1546.
+    fetched, code, meta, _ = run(settled, rows=3, advertised=1546)
+    ok &= check("a settled scroll far below the advertised total is a stall",
+                meta and meta["stop_reason"] == "scroll_stalled")
+    ok &= check("...and the run is PARTIAL, not complete",
+                meta and meta["status"] == "partial")
+    ok &= check("...and exits 6", code == EXIT_PARTIAL)
+    ok &= check("...with the contradiction visible in the sidecar",
+                meta and meta["completeness"]["short_by"] == 1543)
 
     # 3. Reaching the target the caller asked for is ALSO complete: the
     #    request was satisfied, and `short_by` is what says there is more.
     target = {"settled": False, "reached_target": True, "rounds": 6,
               "cards": 122, "height": 17434, "boundaries": [22, 122]}
-    fetched, code, meta, _ = run(target)
+    fetched, code, meta, _ = run(target, advertised=1546)
     ok &= check("reaching --pages worth of cars reports completed",
                 meta and meta["stop_reason"] == "completed")
     ok &= check("...and is a complete run", meta and meta["status"] == "complete")

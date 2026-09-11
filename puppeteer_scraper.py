@@ -977,24 +977,6 @@ def scrape(args) -> int:
             session.close()
         bridge.close()
 
-    if not outcome.ok:
-        stop_reason = ("page_load_timeout" if outcome.load_failed
-                       else f"blocked_{outcome.blocked_by}")
-        blocked = outcome.blocked_by is not None
-    elif args.mode == "detail":
-        stop_reason = "single_page_mode"
-    else:
-        scroll = outcome.scroll or {}
-        if scroll.get("reached_target"):
-            stop_reason = "completed"
-        elif scroll.get("settled"):
-            # The grid stopped growing across three consecutive rounds: the
-            # listing itself ran out. A property of the DATA, not of a
-            # selector's absence.
-            stop_reason = "no_new_products"
-        else:
-            stop_reason = "scroll_budget_exhausted"
-
     all_rows = []
     merged_seen = set()
     for oc in sorted(outcomes, key=lambda o: o.page_num):
@@ -1003,6 +985,18 @@ def scrape(args) -> int:
             logger.info("Dropped %d duplicate row(s) by %s.",
                         len(oc.products) - len(fresh), dedupe_key)
         all_rows.extend(fresh)
+
+    # THE RUN STATUS, decided after the merge because one of its cases needs
+    # the row count that the merge produces.
+    if not outcome.ok:
+        stop_reason = ("page_load_timeout" if outcome.load_failed
+                       else f"blocked_{outcome.blocked_by}")
+        blocked = outcome.blocked_by is not None
+    elif args.mode == "detail":
+        stop_reason = "single_page_mode"
+    else:
+        stop_reason = page_flow.listing_stop_reason(
+            outcome.scroll, outcome.completeness, len(all_rows))
 
     ok_pages = [o for o in outcomes if o.ok]
     failed_pages = [o.page_num for o in outcomes if not o.ok]

@@ -597,6 +597,53 @@ def completeness(rows_collected: int, html: Optional[str],
     return out
 
 
+def listing_stop_reason(scroll: Optional[dict], completeness: Optional[dict],
+                        rows_collected: int) -> str:
+    """Why a listing run stopped, as the sidecar's `stop_reason`.
+
+    In one place for all three engines, because the value decides whether the
+    run reports `complete` or `partial` and three copies of that would drift.
+
+    The interesting case is the last one, and it was found by a live run
+    rather than by reading the code. Through a rotating residential gateway
+    the grid stopped growing at 22 cars: every request leaves from a
+    different address, so the hydration XHR for the second batch never
+    landed. The scroll did exactly what it is told to do — three rounds with
+    no new cards and no height change means "the listing ran out" — and the
+    run reported **`complete` while holding 22 of an advertised 1546**, with
+    `short_by: 1524` in the same sidecar contradicting it.
+
+    "The grid stopped growing" is a statement about our session; "the listing
+    ran out" is a statement about the catalogue, and only the site's own
+    advertised total can turn one into the other. So where the site publishes
+    that total and the run is far below it, a settled scroll is a STALL
+    rather than an exhausted listing, and `scroll_stalled` keeps it out of
+    `output_writer.COMPLETE_STOP_REASONS` — exit 6, not exit 0.
+
+    Where the site advertises no total the old reading stands: there is
+    nothing better to judge against, and calling every settled scroll partial
+    would make the status meaningless.
+    """
+    scroll = scroll or {}
+    advertised = (completeness or {}).get("total_available")
+    if scroll.get("reached_target"):
+        # The run got the batches it was asked for. There is very probably
+        # more listing left — that is what `short_by` in the sidecar is for —
+        # but the request was satisfied, so this is complete.
+        return "completed"
+    if scroll.get("settled"):
+        if advertised is not None and rows_collected < advertised:
+            return "scroll_stalled"
+        # The grid stopped growing and the site's own count agrees there was
+        # no more to get. That is the DATA-based terminating condition §7
+        # asks for rather than a selector's absence.
+        return "no_new_products"
+    # The round budget ran out with the page still growing. Partial, and it
+    # has to say so: the missing tail would otherwise read as delisted cars
+    # in the next diff.
+    return "scroll_budget_exhausted"
+
+
 # ---------------------------------------------------------------------------
 # Concurrency
 # ---------------------------------------------------------------------------

@@ -119,6 +119,20 @@ by a check now.
   target is reached while the page keeps hydrating; three engines that all
   wrote 62 rows had counters reading 62, 42 and 62. It is now derived from
   the rows in the file.
+- **A stalled lazy load reported a COMPLETE run holding 22 of 1546.** Found
+  by the last live run of the release, through a rotating residential
+  gateway: every request leaves from a different address, so the hydration
+  XHR for the second batch never landed and the grid stopped growing. The
+  scroll did exactly what it is told to do — three rounds with no new cards
+  means "the listing ran out" — and the sidecar said `status: complete` with
+  `short_by: 1524` beside it, contradicting itself.
+
+  "The grid stopped growing" is a statement about our session; "the listing
+  ran out" is one about the catalogue, and only the site's own advertised
+  total turns one into the other. A settled scroll far below that total is
+  now `scroll_stalled` — status `partial`, exit 6 — and
+  `page_flow.listing_stop_reason` makes that decision once for all three
+  engines.
 
 ### Two findings that shaped the parser
 
@@ -158,6 +172,21 @@ by a check now.
   `page_param_warning`, `recaptcha_note`, `block_retry_budget` and
   `concurrency_refusal` are each read by all three engines, and the suite
   asserts it.
+
+### The paid paths, each run live
+
+- **Scraping Browser API** (`--cdp-endpoint`): 62 cars, identical to the
+  direct run. Its own auto-solve extension noticed Spinny's invisible v3
+  widget and logged `CAPTCHA detected` / `sent to 2captcha for solving` on a
+  page that had already delivered those 62 cars — worth knowing if you are
+  watching a bill, since nothing on this site needs solving.
+- **Residential proxy**: verified on an Indian exit (Palghar, Maharashtra),
+  62 cars at 100% price coverage. Note that Chromium cannot authenticate a
+  SOCKS5 proxy — such a URL is refused with exit 2 rather than sent with its
+  credentials dropped — and that a rotating gateway can stall the lazy load,
+  which is what surfaced the `scroll_stalled` defect above.
+- **Fingerprint API**: fingerprint 3088655 (IN) fetched and applied to a live
+  run. `fingerprint_client.py` reading `.env` was fixed in the process.
 
 ### The Scraper API engine returns nothing here, by construction
 
