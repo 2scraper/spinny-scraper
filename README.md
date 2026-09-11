@@ -448,7 +448,11 @@ Fixtures are real captures, trimmed to whole cards and verified to parse
 identically to the untrimmed original before being committed.
 
 `canary.yml` runs one real listing daily and asserts the row floor, the price
-coverage, the two price bases and the run status.
+coverage, the two price bases, the uniqueness of `page`+`position`, the
+site's own advertised total and the run status. Unlike every sibling repo's,
+it needs **no credential** — dispatched for the first time on 2026-09-11 from
+a bare GitHub runner it returned **82 cars, 82 priced, 79 with a hub,
+advertised 1546, status `complete`**.
 
 ---
 
