@@ -839,8 +839,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
 
         if not page_flow.should_retry(state):
             # "content" and "empty" are both final answers. An empty page is
-            # a CORRECT one — a hub category has no grid, and one page past
-            # the end of a listing has no products — so retrying it would
+            # a CORRECT one — an SEO landing page has no grid, and a cityless
+            # listing URL serves its grid empty — so retrying it would
             # spend the user's budget re-confirming the same right answer,
             # and rotating the exit would blame an address for the URL it was
             # given.
@@ -1409,8 +1409,9 @@ def parse_args():
                    help="Attempts per page load before giving up (default 3). "
                         "The pause between attempts doubles each time. A page "
                         "that comes back EMPTY is not retried — see "
-                        "page_flow.STATE_POLICY — because an empty hub "
-                        "category is a correct answer, not a fault.")
+                        "page_flow.STATE_POLICY — because an SEO landing page "
+                        "or a cityless URL having no grid is a correct "
+                        "answer, not a fault.")
     p.add_argument("--retry-delay", type=float, default=2.0,
                    help="Seconds before the first page-load retry, doubling "
                         "thereafter (default 2.0)")
