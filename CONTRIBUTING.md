@@ -162,7 +162,7 @@ silently regress:
   file with `[]`. `--allow-empty` is the opt-out.
 - **Exit codes are a contract**, not decoration: `0` ok, `1` crash, `2` bad
   usage, `3` blocked (the 403 refusal, or a challenge), `4` zero rows —
-  including a hub category, which is a correct answer — `5` remote API error,
+  including an SEO landing page or a cityless URL, which is a correct answer — `5` remote API error,
   `6` partial. A pipeline branches on these.
 - **An EMPTY page is never retried and never counted as blocked.** An SEO
   landing page has no car grid, and a listing URL that names no city is

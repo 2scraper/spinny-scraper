@@ -11,6 +11,24 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- Leftovers from the repos this one was bootstrapped from:
+  `playwright_scraper.py --retries` help said an empty "hub category" is a
+  correct answer, and its retry comment spoke of "one page past the end of a
+  listing", which cannot happen on a site that ignores `?page=N`. Both now
+  say what the pyppeteer and Selenium engines already said: an SEO landing
+  page or a cityless URL. `CONTRIBUTING.md` said the same thing the same
+  way and is fixed too.
+- The bug-report template's "What you expected" placeholder was another
+  site's ("96 products ... a category page"); it now uses this repo's
+  20-cars-per-batch figure.
+- `captcha_solver.py` no longer points at a "No DataDome solver" section that
+  does not exist.
+- `SECURITY.md` said this project has no releases or tags; it has both.
+
 ## [0.1.1] — 2026-09-11
 
 ### Fixed

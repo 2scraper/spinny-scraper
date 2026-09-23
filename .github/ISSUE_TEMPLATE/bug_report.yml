@@ -101,7 +101,7 @@ body:
     attributes:
       label: What you expected instead
       placeholder: >-
-        96 products, as the README says a category page yields.
+        About 20 cars per scrolled batch, as the README says a city listing yields.
     validations:
       required: true
 
