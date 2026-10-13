@@ -1062,7 +1062,7 @@ def parse_args():
                         "engine: page 5 of an infinitely scrolling grid has "
                         "no address to hand a worker. Split the work across "
                         "Spinny's own filter URLs instead.")
-    p.add_argument("--retries", type=int, default=3,
+    p.add_argument("--retries", type=page_flow.attempts, default=3,
                    help="Attempts per page load before giving up (default 3). "
                         "A page that comes back EMPTY is not retried: an SEO "
                         "landing page or a cityless URL having no grid is a "
