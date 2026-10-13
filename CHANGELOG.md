@@ -13,6 +13,15 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ## [Unreleased]
 
+---
+
+## [0.1.2] — 2026-10-13
+
+> **Behaviour change for Docker users:** the image now runs as an
+> unprivileged user (UID 10001) instead of root. A bind-mounted output
+> directory such as `-v "$PWD/out:/out"` must be writable by that UID, or run
+> with `--user "$(id -u)"`; otherwise the run cannot save its output.
+
 ### Changed
 
 - **Output files are written atomically.** JSON, CSV and the `.meta.json`
@@ -282,5 +291,6 @@ at all. It is kept because it is family core and is the right tool on sites
 whose grid is server-rendered — and because family core that exists in five
 repos and is exercised in four is how untested inheritance ships.
 
+[0.1.2]: https://github.com/2scraper/spinny-scraper/releases/tag/v0.1.2
 [0.1.1]: https://github.com/2scraper/spinny-scraper/releases/tag/v0.1.1
 [0.1.0]: https://github.com/2scraper/spinny-scraper/releases/tag/v0.1.0
