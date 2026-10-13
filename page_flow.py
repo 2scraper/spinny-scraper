@@ -448,6 +448,37 @@ BLOCK_RETRIES_WITHOUT_POOL = 1
 SOLVES_PER_PAGE = 1
 
 
+class SolveBudget:
+    """Every paid solve on one page goes through here: one counter, checked
+    BEFORE each purchase rather than beside one of them.
+
+    `handle_captcha_if_present` runs twice per fetch attempt: once before the
+    page is classified, so a challenge is cleared before anything is judged,
+    and once after, for the state that says the page really is gated. Only
+    the second call used to be counted, so the first repeated on every
+    block-retry and `SOLVES_PER_PAGE` read like a limit while limiting
+    nothing. Reproduced with the solver stubbed: 3 invocations against a
+    limit of 1.
+
+    It counts PURCHASES, not calls: the handler runs on every navigation and
+    on a clean page finds no captcha and buys nothing, which must not spend
+    the allowance. It does not reset on rotation: a fresh exit is a reason to
+    re-fetch, not a fresh allowance. Pure policy, no driver in it, so the
+    three engines cannot disagree about it.
+    """
+
+    def __init__(self, limit: int = SOLVES_PER_PAGE):
+        self.limit = limit
+        self.spent = 0
+
+    def try_spend(self) -> bool:
+        """Reserve one purchase. False (and nothing counted) if none is left."""
+        if self.spent >= self.limit:
+            return False
+        self.spent += 1
+        return True
+
+
 def block_retry_budget(has_pool: bool, retries: int) -> int:
     """How many extra attempts a blocked page gets.
 

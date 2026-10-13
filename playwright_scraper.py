@@ -579,7 +579,7 @@ def _content_when_settled(page, attempts: int = 4, pause_ms: int = 700):
     return None
 
 
-def handle_captcha_if_present(page, args) -> bool:
+def handle_captcha_if_present(page, args, budget=None) -> bool:
     """Detect and solve a challenge. True if something was solved.
 
     Runs after EVERY navigation, for ANY page — not scoped to one URL. The
@@ -648,6 +648,13 @@ def handle_captcha_if_present(page, args) -> bool:
         logger.warning("No 2captcha API key, so this challenge cannot be "
                        "solved — continuing with whatever the page already "
                        "holds.")
+        return False
+    if budget is not None and not budget.try_spend():
+        logger.info("Not solving this challenge: %d of %d solve(s) "
+                    "already bought on this page. A challenge that survives "
+                    "a solved token is not one this run can pass, and a "
+                    "second solve is a second charge for the same answer.",
+                    budget.spent, budget.limit)
         return False
     try:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
@@ -722,7 +729,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # Counted across the whole block-retry loop, not per attempt: a page that
     # keeps coming back as a challenge would otherwise buy one solve per
     # rotation, which is how a run quietly turns into a bill.
-    solves_bought = 0
+    budget = page_flow.SolveBudget()
     html, state, load_failed = None, "ok", False
 
     for block_attempt in range(block_retries + 1):
@@ -764,7 +771,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         if load_failed:
             break
 
-        if handle_captcha_if_present(session.page, args):
+        if handle_captcha_if_present(session.page, args, budget):
             # A solve navigated the page. Give the destination a moment
             # before judging what came back.
             session.page.wait_for_timeout(1000)
@@ -819,10 +826,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # scraper that cannot name what stopped it is much harder to fix —
         # and bounded by SOLVES_PER_PAGE so a speculative path cannot become
         # a bill.
-        if (page_flow.should_solve(state)
-                and solves_bought < page_flow.SOLVES_PER_PAGE):
-            solves_bought += 1
-            if handle_captcha_if_present(session.page, args):
+        if page_flow.should_solve(state):
+            if handle_captcha_if_present(session.page, args, budget):
                 session.page.wait_for_timeout(1000)
                 html = _content_when_settled(session.page) or html
                 state = _classify(session.page, html)

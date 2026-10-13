@@ -13,6 +13,37 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ## [Unreleased]
 
+### Changed
+
+- **Output files are written atomically.** JSON, CSV and the `.meta.json`
+  sidecar are written to a temporary file beside the target and renamed over
+  it, so a crash or a full disk halfway through leaves the PREVIOUS good file
+  whole instead of a truncated one. A new file gets the mode a plain
+  `open()` would (0666 minus the umask); an existing file keeps its mode.
+- **The Docker image runs as an unprivileged user** (UID 10001), with
+  Chromium in `/ms-playwright`. A bind-mounted output directory must be
+  writable for that UID, or pass `--user "$(id -u)"`.
+
+### Added
+
+- **CSV cells that begin with `=`, `+`, `-`, `@`, tab or newline are prefixed
+  with an apostrophe** so a spreadsheet reads them as text; JSON is unchanged
+  and the sidecar records `csv_cells_escaped`. Measured 2026-10-13 before
+  shipping: 0 of 4,096 string cells across 217 rows (three listings plus the
+  committed sample) begin with any of them, so this does not fire on today's
+  data.
+
+### Fixed
+
+- **The captcha budget was enforced at one of two call sites.**
+  `handle_captcha_if_present` runs twice per fetch attempt and only the
+  second call was counted against `SOLVES_PER_PAGE`, so the first could buy
+  a solve on every block-retry. One `page_flow.SolveBudget` is now checked
+  inside the handler, immediately before the purchase, in all three engines;
+  it counts purchases, not calls, and does not reset on rotation. No
+  challenge has ever been observed on this site, so this cost nothing in
+  practice and is a guard on a path that is off by default.
+
 ### Fixed
 
 - **Scraper API: `waitFor` is now sent as a JSON object.** It went out as a

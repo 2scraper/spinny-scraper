@@ -310,6 +310,15 @@ cards carry no strike price — and those same 20 carry no discount badge, so
 they are *not discounted* rather than *not parsed*. `discount_pct` is null on
 exactly those rows.
 
+> **Re-measured 2026-10-13, and the figure above no longer holds:** 0 of 186
+> live tiles (the first 62 of Delhi NCR, Mumbai and Bangalore, one run each)
+> carried a strike price, a discount badge or any "OFF"/"Save" text, so
+> `original_price` and `discount_amount` were null on every row and the
+> parser logged its coverage warnings. Either Spinny stopped discounting or
+> it changed how a discount is drawn; a card WITH a discount is what would
+> tell the two apart, and none was in these samples. The 685/705 figure was
+> taken on 2026-09-11 and is kept as history, not as a current rate.
+
 **`rating` and `review_count` are null on every row of every run.** Spinny
 publishes no car-level rating anywhere. The five inspection scores a detail
 page shows are about different *parts* of one car, and the customer reviews

@@ -485,7 +485,7 @@ def _check_for_new_pagination(session, page_num: int = 1) -> None:
         len(hrefs), ", ".join(hrefs[:3]))
 
 
-def handle_captcha_if_present(session, args) -> bool:
+def handle_captcha_if_present(session, args, budget=None) -> bool:
     """Detect and solve a challenge. True if something was solved.
 
     Same two families, same order, same "detected is not blocking" rule as
@@ -527,6 +527,13 @@ def handle_captcha_if_present(session, args) -> bool:
     if not args.twocaptcha_key:
         logger.warning("No 2captcha API key, so this challenge cannot be solved.")
         return False
+    if budget is not None and not budget.try_spend():
+        logger.info("Not solving this challenge: %d of %d solve(s) "
+                    "already bought on this page. A challenge that survives "
+                    "a solved token is not one this run can pass, and a "
+                    "second solve is a second charge for the same answer.",
+                    budget.spent, budget.limit)
+        return False
     try:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
                                 api_version=args.captcha_api,
@@ -567,7 +574,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # Counted across the whole block-retry loop, not per attempt: a page that
     # keeps coming back as a challenge would otherwise buy one solve per
     # rotation, which is how a run quietly turns into a bill.
-    solves_bought = 0
+    budget = page_flow.SolveBudget()
     html, state, load_failed = None, "ok", False
 
     for block_attempt in range(block_retries + 1):
@@ -612,7 +619,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             break
 
 
-        if handle_captcha_if_present(session, args):
+        if handle_captcha_if_present(session, args, budget):
             time.sleep(1)
 
         html = _content(session) or ""
@@ -654,10 +661,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # because a bot manager can be switched on between deploys, and
         # bounded by SOLVES_PER_PAGE so a speculative path cannot become a
         # bill.
-        if (page_flow.should_solve(state)
-                and solves_bought < page_flow.SOLVES_PER_PAGE):
-            solves_bought += 1
-            if handle_captcha_if_present(session, args):
+        if page_flow.should_solve(state):
+            if handle_captcha_if_present(session, args, budget):
                 time.sleep(1)
                 html = _content(session) or html
                 state = page_flow.classify(html, url=page.url)

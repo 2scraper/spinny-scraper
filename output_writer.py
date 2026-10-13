@@ -74,8 +74,12 @@ Everything below is row-class-agnostic: pass `row_cls` so an empty CSV still
 gets the right header for the mode that produced it.
 """
 
+import contextlib
 import csv
 import json
+import os
+import stat
+import tempfile
 from dataclasses import dataclass, asdict, field, fields
 from datetime import datetime, timezone
 from typing import Optional, List, Set, Sequence, Any, Type
@@ -327,6 +331,65 @@ def dedupe_by_sku(rows: Sequence[Any], seen: Set[str]) -> List[Any]:
 # handled) is neither readable nor parseable by anything but Python.
 LIST_CSV_SEPARATOR = " | "
 
+# A spreadsheet treats a cell beginning with one of these as a FORMULA, not as
+# text, and every string in a row here was written by whoever published the
+# listing: a seller-chosen title, a dealer's city. `=HYPERLINK(...)`,
+# `+cmd|...` and `@SUM(...)` are the classic shapes; tab and newline are
+# here because some readers strip a leading one and expose what follows.
+#
+# Only STRINGS are touched (escaping a number would turn `-5` into text and
+# break every sum over the column), and only in the CSV: the JSON keeps the
+# site's bytes, so the two files deliberately differ and `csv_cells_escaped`
+# in the sidecar declares it. Whether it fires on Spinny is measured in
+# CHANGELOG.md, not claimed here.
+CSV_FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r", "\n")
+CSV_FORMULA_ESCAPE = "'"
+
+
+@contextlib.contextmanager
+def _atomic(path: str, newline: Optional[str] = None):
+    """Write to a temporary file beside `path`, then rename over it.
+
+    `open(path, "w")` truncates before a single byte is written, so a crash,
+    a kill or a full disk halfway through `json.dump` leaves a SHORTER file
+    where a complete one was: the previous good run is destroyed by the
+    ATTEMPT to replace it, which is the promise `save` keeps by refusing to
+    overwrite good output with an empty result, broken by another route.
+    The sidecar matters most: it is the file a consumer branches on.
+
+    The temp file goes in the SAME directory because `os.replace` is atomic
+    only within one filesystem. `fsync` before the rename makes the content
+    durable rather than merely visible.
+
+    MODE: NamedTemporaryFile creates 0600, and renaming it over the target
+    would quietly turn every output private. A new file gets what a plain
+    `open()` would have given it (0666 minus the umask); an existing target
+    keeps its mode, so a save never undoes a tightening done on purpose.
+    """
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    try:
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+    except OSError:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", newline=newline, dir=directory,
+        prefix=os.path.basename(path) + ".", suffix=".tmp", delete=False)
+    try:
+        with handle:
+            yield handle
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(handle.name, mode)
+        os.replace(handle.name, path)
+    except BaseException:
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+        raise
+
 
 def _csv_value(v: Any) -> Any:
     if isinstance(v, (list, tuple)):
@@ -334,12 +397,20 @@ def _csv_value(v: Any) -> Any:
     return v
 
 
+def _csv_escape(v: Any):
+    """Neutralise a formula-shaped cell. Returns (value, was_escaped)."""
+    if isinstance(v, str) and v.startswith(CSV_FORMULA_LEADS):
+        return CSV_FORMULA_ESCAPE + v, True
+    return v, False
+
+
 def write_json(rows: Sequence[Any], path: str) -> None:
-    with open(path, "w", encoding="utf-8") as f:
+    with _atomic(path) as f:
         json.dump([asdict(r) for r in rows], f, ensure_ascii=False, indent=2)
 
 
-def write_csv(rows: Sequence[Any], path: str, row_cls: Type = Product) -> None:
+def write_csv(rows: Sequence[Any], path: str, row_cls: Type = Product) -> int:
+    """Write the CSV; return how many cells were formula-neutralised."""
     # An empty result still gets the header row. A zero-byte file makes a
     # consumer fail on read (no columns to parse) instead of reading a valid
     # table with zero rows — and "an empty result is still a well-formed
@@ -348,11 +419,23 @@ def write_csv(rows: Sequence[Any], path: str, row_cls: Type = Product) -> None:
     # The header comes from `row_cls`, not from the first row, so an empty
     # run still writes the columns of the mode that produced it.
     fieldnames = [f.name for f in fields(row_cls)]
-    with open(path, "w", encoding="utf-8", newline="") as f:
+    escaped = 0
+    # `newline=""` is the csv module's documented requirement and has to
+    # survive the move into a temp file, or every row gains a stray CR on
+    # Windows.
+    with _atomic(path, newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for r in rows:
-            writer.writerow({k: _csv_value(v) for k, v in asdict(r).items()})
+            row = {}
+            for k, v in asdict(r).items():
+                # AFTER `_csv_value`: a list joined into one cell is text
+                # too, and its first element can be formula-shaped while the
+                # list itself is not a string.
+                row[k], hit = _csv_escape(_csv_value(v))
+                escaped += hit
+            writer.writerow(row)
+    return escaped
 
 
 # Exit code used when a run completes but produced nothing. Distinct from 1
@@ -439,7 +522,7 @@ def write_run_meta(out_prefix: str, meta: dict) -> str:
     both complete, and between runs of different `mode`.
     """
     path = f"{out_prefix}.meta.json"
-    with open(path, "w", encoding="utf-8") as f:
+    with _atomic(path) as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
     print(f"[+] Wrote run metadata -> {path} (status={meta.get('status')})")
     return path
@@ -504,7 +587,8 @@ def run_meta(status: str, stop_reason: str, pages_requested: int,
 
 
 def save(rows: Sequence[Any], out_prefix: str, fmt: str,
-         allow_empty: bool = False, row_cls: Type = Product) -> int:
+         allow_empty: bool = False, row_cls: Type = Product,
+         stats: Optional[dict] = None) -> int:
     """Write JSON/CSV and return a process exit code.
 
     Returns 0 when rows were written, EXIT_NO_PRODUCTS when there were none.
@@ -531,8 +615,15 @@ def save(rows: Sequence[Any], out_prefix: str, fmt: str,
         write_json(rows, f"{out_prefix}.json")
         print(f"[+] Saved {len(rows)} products -> {out_prefix}.json")
     if fmt in ("csv", "both"):
-        write_csv(rows, f"{out_prefix}.csv", row_cls=row_cls)
+        escaped = write_csv(rows, f"{out_prefix}.csv", row_cls=row_cls)
         print(f"[+] Saved {len(rows)} products -> {out_prefix}.csv")
+        if stats is not None:
+            stats["csv_cells_escaped"] = escaped
+        if escaped:
+            print(f"[!] {escaped} CSV cell(s) began with a formula character "
+                  f"and were prefixed with {CSV_FORMULA_ESCAPE!r} so a "
+                  f"spreadsheet reads them as text. The JSON output is "
+                  f"unchanged — see csv_cells_escaped in the sidecar.")
     return 0 if rows else EXIT_NO_PRODUCTS
 
 
@@ -593,7 +684,9 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
     # names has a hole for every name nobody added to it.
     complete = stop_reason in COMPLETE_STOP_REASONS and not pages_failed
     row_cls = ROW_CLASS_BY_MODE.get(mode, Product)
-    rc = save(rows, out_prefix, fmt, allow_empty=allow_empty, row_cls=row_cls)
+    stats: dict = {}
+    rc = save(rows, out_prefix, fmt, allow_empty=allow_empty, row_cls=row_cls,
+              stats=stats)
     wrote_output = bool(rows) or allow_empty
 
     if wrote_output:
@@ -604,7 +697,9 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
             pages_requested=pages_requested, pages_completed=pages_completed,
             pages_failed=pages_failed, mode=mode, source=source,
             start_url=start_url, final_url=final_url, products=len(rows),
-            extra=extra))
+            # The writer's own facts go UNDER the caller's `extra`: a
+            # collision must never let housekeeping drop site data.
+            extra={**stats, **(extra or {})}))
 
     if not rows:
         # Nothing gathered at all, and WHY decides the code. The three
