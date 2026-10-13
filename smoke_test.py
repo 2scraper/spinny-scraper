@@ -2283,6 +2283,117 @@ def test_no_unused_imports():
     return ok
 
 
+def test_audit_2026_10_13():
+    group("atomic writes, CSV formula guard and the single captcha budget")
+    import output_writer as ow
+    ok = True
+    rows = [Product(sku="1", url="u1", price=1.0, title="=HYPERLINK(\"x\")"),
+            Product(sku="2", url="u2", price=-5.0, title="Hyundai i10")]
+
+    # --- a failed write must leave the previous good file whole ---------
+    class _Boom(Exception):
+        pass
+
+    def _half_dump(obj, f, **kw):
+        f.write("[{\"half\":")
+        raise _Boom()
+
+    for what in ("write_json", "write_csv", "write_run_meta"):
+        with tempfile.TemporaryDirectory() as d:
+            target = os.path.join(d, {"write_json": "out.json",
+                                      "write_csv": "out.csv",
+                                      "write_run_meta": "out.meta.json"}[what])
+            open(target, "w").write("GOOD")
+            real_dump, real_writerow = ow.json.dump, ow.csv.DictWriter.writerow
+            try:
+                ow.json.dump = _half_dump
+
+                def _bad(self, r):
+                    self.writer.writerow(["half"])
+                    raise _Boom()
+                ow.csv.DictWriter.writerow = _bad
+                try:
+                    if what == "write_json":
+                        ow.write_json(rows, target)
+                    elif what == "write_csv":
+                        ow.write_csv(rows, target)
+                    else:
+                        with redirect_stdout(io.StringIO()):
+                            ow.write_run_meta(target[:-len(".meta.json")],
+                                              {"status": "complete"})
+                    raised = False
+                except _Boom:
+                    raised = True
+            finally:
+                ow.json.dump, ow.csv.DictWriter.writerow = real_dump, real_writerow
+            ok &= check("%s: the fault was actually reached" % what, raised)
+            ok &= check("%s: a failed write leaves the previous file intact" % what,
+                        open(target).read() == "GOOD")
+            ok &= check("%s: a failed write leaves no temp file behind" % what,
+                        os.listdir(d) == [os.path.basename(target)])
+
+    # --- the mode of a written file: not 0600, and not a flat 0644 -----
+    if os.name == "posix":
+        old = os.umask(0o022)
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                p = os.path.join(d, "a.json")
+                ow.write_json(rows, p)
+                ok &= check("umask 022 gives a new output 0644",
+                            (os.stat(p).st_mode & 0o777) == 0o644)
+                os.umask(0o002)
+                p2 = os.path.join(d, "b.json")
+                ow.write_json(rows, p2)
+                ok &= check("umask 002 gives a new output 0664",
+                            (os.stat(p2).st_mode & 0o777) == 0o664)
+                os.chmod(p, 0o600)
+                ow.write_json(rows, p)
+                ok &= check("an existing 0600 output stays 0600",
+                            (os.stat(p).st_mode & 0o777) == 0o600)
+        finally:
+            os.umask(old)
+
+    # --- CSV formula guard ------------------------------------------------
+    with tempfile.TemporaryDirectory() as d:
+        prefix = os.path.join(d, "o")
+        with redirect_stdout(io.StringIO()):
+            finish_run(rows, prefix, "both", False, blocked=False,
+                       stop_reason="completed", pages_requested=1,
+                       pages_completed=1, start_url="u", final_url="u")
+        cells = list(csv.DictReader(open(prefix + ".csv", encoding="utf-8")))
+        ok &= check("a formula-shaped CSV cell is prefixed so it reads as text",
+                    cells[0]["title"] == "'=HYPERLINK(\"x\")")
+        ok &= check("a negative NUMBER is left alone (sums over the column keep working)",
+                    float(cells[1]["price"]) == -5.0)
+        ok &= check("the JSON keeps the site's bytes",
+                    json.load(open(prefix + ".json"))[0]["title"] == "=HYPERLINK(\"x\")")
+        ok &= check("the sidecar declares the CSV divergence",
+                    json.load(open(prefix + ".meta.json")).get("csv_cells_escaped") == 1)
+
+    # --- the captcha budget ----------------------------------------------
+    b = page_flow.SolveBudget(1)
+    ok &= check("the budget allows exactly SOLVES_PER_PAGE purchases",
+                [b.try_spend() for _ in range(3)] == [True, False, False]
+                and page_flow.SolveBudget().limit == page_flow.SOLVES_PER_PAGE)
+    # Read off disk, NOT behind an engine import: this must run for the
+    # engines whose driver is absent from the venv.
+    for eng in ("playwright", "puppeteer", "selenium"):
+        src = open(os.path.join(REPO_ROOT, "%s_scraper.py" % eng), encoding="utf-8").read()
+        tree = ast.parse(src)
+        fn = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+              and n.name == "handle_captcha_if_present"][0]
+        fn_src = ast.get_source_segment(src, fn)
+        ok &= check("%s: the budget is spent BEFORE the solver is paid" % eng,
+                    0 <= fn_src.find("budget.try_spend()") < fn_src.find("solve_recaptcha("))
+        calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                 and getattr(n.func, "id", None) == "handle_captcha_if_present"]
+        ok &= check("%s: both call sites pass the one budget (%d found)" % (eng, len(calls)),
+                    len(calls) == 2 and all(len(c.args) == 3 for c in calls))
+        ok &= check("%s: no second counter beside the budget" % eng,
+                    "solves_bought" not in src)
+    return ok
+
+
 def test_dockerfile_copies_what_it_runs():
     group("the Docker image contains every module its entrypoint imports")
     ok = True
@@ -2312,6 +2423,8 @@ def test_dockerfile_copies_what_it_runs():
         parts = [x.strip().strip('"\'') for x in m.group(1).split(",")]
         entrypoint = next((x for x in parts if x.endswith(".py")), None)
     ok &= check("the Dockerfile names a Python entrypoint", bool(entrypoint))
+    ok &= check("the Dockerfile drops root before the entrypoint",
+                re.search(r"^USER\s+(?!root\b)\S+", raw, re.M) is not None)
     if not entrypoint:
         return False
     ok &= check("the entrypoint itself is copied into the image",
@@ -3297,6 +3410,7 @@ def main() -> int:
     ok &= test_no_undefined_names()
     ok &= test_no_unused_imports()
     ok &= test_dockerfile_copies_what_it_runs()
+    ok &= test_audit_2026_10_13()
     ok &= test_sample_output()
     ok &= test_x_debug_header_is_redacted()
     ok &= test_scraper_api_waitfor_is_an_object()

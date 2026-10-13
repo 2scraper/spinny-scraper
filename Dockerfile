@@ -13,6 +13,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Chromium goes in a path every user can read. Playwright's default is under
+# the INSTALLING user's home, so the non-root user below would not find it.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 COPY requirements.txt requirements-playwright.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-playwright.txt \
     # Playwright's own apt-get for Chromium's shared-library dependencies —
@@ -28,6 +32,13 @@ RUN pip install --no-cache-dir -r requirements.txt -r requirements-playwright.tx
 COPY captcha_solver.py env_config.py fingerprint_client.py output_writer.py \
      page_flow.py playwright_scraper.py product_parser.py proxy_pool.py \
      diff_runs.py ./
+
+# Run as an unprivileged user: a scraper parses untrusted pages in a browser,
+# and nothing here needs root once Chromium is installed. Mount the output
+# directory writable for UID 10001 (or pass `--user "$(id -u)"`).
+RUN useradd --create-home --uid 10001 scraper \
+    && mkdir -p /out && chown scraper /out
+USER scraper
 
 ENTRYPOINT ["python3", "playwright_scraper.py"]
 CMD ["--help"]
