@@ -35,7 +35,7 @@ What is different about Spinny
   infinitely scrolling page that hydrates 20 cars at a time, so `--pages N`
   means N batches of 20 and the engine reaches them by scrolling. A planner
   that built `?page=N` would fetch page one N times, find no new id, and
-  report a COMPLETE run holding a twentieth of the catalogue — §7's
+  report a COMPLETE run holding a twentieth of the catalogue — the
   silent-single-page failure with the site answering 200 the whole way.
 * **`--concurrency` above 1 is refused, and this engine ships no worker
   pool.** Page 5 of an infinitely scrolling grid has no address to hand a
@@ -66,7 +66,7 @@ What is different about Spinny
   invisible widget with a hidden badge. v3 scores rather than challenges, so
   there is nothing to solve and `--solve-captcha` has nothing to buy — and
   `recaptcha` is deliberately NOT a block marker, because a marker matching
-  every page is worse than no marker (§18).
+  every page is worse than no marker.
 * **No refusal was ever observed.** An Amsterdam datacentre address and a
   Chennai residential address both got the full grid with no key and no
   proxy. So exit 3 on this site is far more likely to be a dead proxy exit
@@ -165,7 +165,7 @@ class PageOutcome:
     state: Optional[str] = None
     # What the listing itself says its catalogue size is, read off Spinny's
     # own heading ("1559 Used cars in Delhi NCR"). This site DOES publish
-    # one, which makes §8's completeness check arithmetic rather than a
+    # one, which makes the completeness check arithmetic rather than a
     # threshold: 482 rows against an advertised 1559 is proof the scroll
     # stopped early. Note the number in the <title> disagrees (1546 against
     # 1559 on one capture) — the heading is the one the site's own API
@@ -296,7 +296,7 @@ def _advertised_next_hrefs(page, page_num: int = 1) -> List[str]:
     nothing reads into a live check. If Spinny ever grows real pagination
     markup, this logs it loudly and names the module to revisit — which is
     better than a constant with a paragraph of justification and no reader
-    (§17 found exactly that in a sibling repo).
+    (a sibling repo had exactly that).
     """
     selector = page_flow.next_page_selector(page_num)
     return [el.get_attribute("href")
@@ -634,7 +634,7 @@ def handle_captcha_if_present(page, args, budget=None) -> bool:
     # loader rather than guessed from the widget. Spinny wires reCAPTCHA
     # Enterprise v3, and an enterprise v3 score task is priced and solved
     # differently from a v2 checkbox — sending v3 parameters for a v2 widget
-    # buys a token the site rejects (§8). Logged before the spend, so a
+    # buys a token the site rejects. Logged before the spend, so a
     # rejected token has an explanation next to it in the log.
     configured = recaptcha_config(html)
     if configured:
@@ -720,8 +720,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # Computed by page_flow, not here, so the three engines cannot disagree
     # about how many attempts a blocked page is worth — and so that
     # `RETRY_ON_BLOCKED` has a READER rather than a paragraph of
-    # justification nobody consults. §17 found exactly that constant, unread,
-    # in a sibling repo: setting it False changed nothing. Setting it False
+    # justification nobody consults. A sibling repo had exactly that
+    # constant, unread: setting it False changed nothing. Setting it False
     # here really does stop the retry loop.
     block_retries = page_flow.block_retry_budget(
         has_pool, args.proxy_block_retries if has_pool
@@ -737,9 +737,16 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # Retry a navigation timeout rather than ending the run on it. One
         # network flap on page 12 of 50 should not break the loop.
         load_failed, exit_failed = False, None
+        status = None
         for attempt in range(1, args.retries + 1):
             try:
-                session.page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                response = session.page.goto(url, wait_until="domcontentloaded",
+                                             timeout=60000)
+                # The HTTP status reaches the classifier, so a 404 or a
+                # non-200 answer is judged by what the server said rather
+                # than only by the markup. None when the driver returns no
+                # response (a same-document navigation).
+                status = getattr(response, "status", None)
                 load_failed = False
                 break
             except (PWTimeout, PWError) as e:
@@ -773,11 +780,13 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
 
         if handle_captcha_if_present(session.page, args, budget):
             # A solve navigated the page. Give the destination a moment
-            # before judging what came back.
+            # before judging what came back — and forget the status, which
+            # belonged to the page the solve replaced.
             session.page.wait_for_timeout(1000)
+            status = None
 
         html = _content_when_settled(session.page) or ""
-        state = _classify(session.page, html)
+        state = _classify(session.page, html, status)
 
         # "Not painted yet" is not a fault, and on this site it is not an
         # edge case either: **Spinny's first response is ALWAYS a shell.**
@@ -811,7 +820,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                 logger.info("The grid still had not painted after %.0fs "
                             "(%d match(es)).", wait_timeout / 1000, found)
             html = _content_when_settled(session.page) or html
-            state = _classify(session.page, html)
+            state = _classify(session.page, html, status)
 
         # No interstitial-settling step here, and its absence is measured
         # rather than an omission: no refusal of any kind was ever observed
@@ -1082,7 +1091,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         outcome.car_facts = car_metadata(html, session.page.url)
 
     # Spinny DOES publish a total, beside its own heading — "1559 Used cars
-    # in Delhi NCR" — which makes §8's completeness check arithmetic rather
+    # in Delhi NCR" — which makes the completeness check arithmetic rather
     # than a threshold. Read it here so the sidecar can carry the gap.
     #
     # Two traps, both measured: the number in the <title> disagrees (1546
@@ -1126,7 +1135,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # LISTING page carries five JSON-LD blocks and not one of them names
         # a car, so `price_source` is "dom+attr" on every listing row and a
         # confirmation threshold would describe nothing. Porting the sibling
-        # repo's overlay would be dead code that looks load-bearing (§4).
+        # repo's overlay would be dead code that looks load-bearing.
         #
         # What replaces it is the check this site actually needs. There are
         # two price BASES here — the displayed figure excludes RC transfer
@@ -1195,7 +1204,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
 # means scrolling past the first 299 in one session.
 #
 # So the machinery is not here. Shipping it would be dead code that looks
-# load-bearing, which §17 names as the same defect as an unenforced policy
+# load-bearing, the same defect as an unenforced policy
 # constant — and a `--concurrency 8` that quietly did nothing useful would be
 # worse than one that says no. The flag is still accepted, because the
 # family's flag contract has it, and `page_flow.concurrency_refusal` explains
@@ -1390,7 +1399,7 @@ def parse_args():
                         "\"luxury-cars\", \"volvo-cars\", "
                         "\"cars-under-1-lakh-rs\" — so the column is rarely "
                         "empty just because the flag was omitted.")
-    p.add_argument("--pages", type=int, default=1,
+    p.add_argument("--pages", type=page_flow.pages_arg, default=1,
                    help="How many BATCHES of 20 cars to gather. Applies to "
                         "--mode listing; ignored in --mode detail. This is a "
                         "SCROLL budget, not a URL plan: a Spinny listing has "
@@ -1398,11 +1407,11 @@ def parse_args():
                         "ignored and returns page 1 under HTTP 200 — so the "
                         "engine reaches batch N by scrolling one long page. "
                         "--pages 5 asks for 100 cars.")
-    p.add_argument("--delay", type=float, default=2.0,
+    p.add_argument("--delay", type=page_flow.delay_arg, default=2.0,
                    help="Delay between pages, seconds. Nothing to pace on "
                         "this site, where a run fetches one URL; kept because "
                         "the family's flag contract has it.")
-    p.add_argument("--concurrency", type=int, default=1, metavar="N",
+    p.add_argument("--concurrency", type=page_flow.concurrency_arg, default=1, metavar="N",
                    help="Accepted and REFUSED on this site, with the reason. "
                         "A worker cannot be handed \"page 5\" because page 5 "
                         "has no address, so N workers would fetch page one N "
@@ -1417,7 +1426,7 @@ def parse_args():
                         "page_flow.STATE_POLICY — because an SEO landing page "
                         "or a cityless URL having no grid is a correct "
                         "answer, not a fault.")
-    p.add_argument("--retry-delay", type=float, default=2.0,
+    p.add_argument("--retry-delay", type=page_flow.retry_delay_arg, default=2.0,
                    help="Seconds before the first page-load retry, doubling "
                         "thereafter (default 2.0)")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
@@ -1442,7 +1451,7 @@ def parse_args():
     p.add_argument("--proxy-shuffle", action="store_true",
                    help="Shuffle the pool at startup, so concurrent runs do not "
                         "all begin on the first exit in the file.")
-    p.add_argument("--proxy-block-retries", type=int, default=2,
+    p.add_argument("--proxy-block-retries", type=page_flow.block_retries_arg, default=2,
                    help="When a page comes back unusable, retry it from this "
                         "many OTHER exits before giving up (default 2). Needs "
                         "a pool of more than one; ignored otherwise. No Spinny "
@@ -1524,7 +1533,7 @@ def parse_args():
         # and look like an empty listing.
         why = unsupported_reason(args.url)
         if why:
-            # Named WITH THE REASON (§5). "is not a Spinny site" would be
+            # Named WITH THE REASON. "is not a Spinny site" would be
             # false for api.spinny.com and sends the reader hunting for a
             # typo that is not there.
             p.error(f"{site_host(args.url)} {why}.")

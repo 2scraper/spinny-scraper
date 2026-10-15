@@ -92,7 +92,35 @@ HEX32 = re.compile(r"\b[0-9a-f]{32}\b")
 HEX32_ALLOWED = ("sha", "hash", "nonce", "example", "md5", "digest",
                  "checksum", "assets.spinny.com")
 
-SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example")
+SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example",
+                    # Captures and data: a raw page dump, a --dump-html
+                    # snapshot or a JSON fixture is where a front-end key or a
+                    # pasted credential actually lands.
+                    ".json", ".csv", ".html", ".htm", ".log", ".cfg", ".ini",
+                    ".toml", ".sh")
+
+# Directory NAMES that are never scanned. Tested against the path RELATIVE to
+# the repo root: tested against the absolute path, a clone that happens to
+# live under a directory called `venv` (or any other name here) scanned 0
+# files and reported "nothing credential-shaped".
+SKIPPED_DIRS = {".git", "__pycache__", ".venv", "venv", ".pytest_cache"}
+
+# A --dump-html run over several pages writes `<name>.page2`, `<name>.page3`,
+# whatever the base name's own suffix was.
+_PAGE_DUMP = re.compile(r"\.page[0-9]+$")
+
+
+def _is_scanned_name(path):
+    """True for a file whose NAME says it may hold a credential or a capture."""
+    name = path.name
+    # `.env`, `.env.bak`, `.env.local`, `.env.save`: a working copy renamed the
+    # way people actually rename them. Path.suffix of ".env.bak" is ".bak",
+    # so a suffix list alone never reads one.
+    if name.startswith(".env"):
+        return True
+    if _PAGE_DUMP.search(name):
+        return True
+    return path.suffix.lower() in SCANNED_SUFFIXES
 
 
 # A directory holding `pyvenv.cfg` is a virtualenv, whatever it is called.
@@ -103,7 +131,7 @@ SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example")
 # into pip's vendored code and flags a 32-hex string in `_elffile.py` as
 # key-shaped. Correct about the string, wrong about the file — and it is the
 # FIRST thing a new user sees from `python3 smoke_test.py`. A guard people
-# have to argue with is one they learn to suppress (CLAUDE.md §22).
+# have to argue with is one they learn to suppress.
 #
 # Deliberately NOT a narrowing of what gets scanned: an untracked file is
 # still read, because a key pasted into a scratch file beside the scripts is
@@ -132,10 +160,9 @@ def _is_in_virtualenv(path):
 
 def scanned_files():
     for path in sorted(REPO.rglob("*")):
-        if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
+        if not path.is_file() or not _is_scanned_name(path):
             continue
-        if any(part in {".git", "__pycache__", ".venv", "venv"}
-               for part in path.parts):
+        if any(part in SKIPPED_DIRS for part in path.relative_to(REPO).parts):
             continue
         if _is_in_virtualenv(path):
             continue
@@ -227,6 +254,11 @@ def secret_check():
                 failed.append(f"{rel}:{lineno} contains {match[:6]}… — a "
                               f"32-char hex string, the shape of a 2captcha key")
 
+    if not scanned:
+        # A scan that read nothing has proved nothing. Reported as a failure
+        # so a path rule that silently excludes the whole tree cannot pass.
+        failed.append("0 files scanned — the exclusion rules matched the "
+                      "whole repository, so nothing was checked")
     if not failed:
         print(f"ok       {scanned} files scanned, nothing credential-shaped")
     return failed

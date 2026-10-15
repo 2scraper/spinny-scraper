@@ -19,8 +19,50 @@ with it, so nobody discovers it from a bill or from a diff.
 > exit 3 or 4 with a 39-byte "capture", in tens of milliseconds. If a
 > script of yours passes 0, pass **1**: the flag counts ATTEMPTS, so 1 means
 > "try once and do not retry".
+>
+> **Behaviour change:** `--pages`, `--concurrency` (both at least 1),
+> `--proxy-block-retries`, `--delay` and `--retry-delay` (all at least 0) now
+> reject values outside those ranges with exit 2 and the flag's name, in all
+> three engines; `scraper_api_client.py` does the same for `--timeout` (at
+> least 1), `--retries` and `--retry-delay` (at least 0). `--retry-delay -1`
+> used to crash the first retry with a traceback.
+>
+> **Behaviour change (canary):** the canary now fails on exit 5 (the content
+> was never obtained) instead of passing with a warning, and its EMI-share
+> and strike/discount-pairing floors are gone (see Fixed).
 
 ### Fixed
+
+- **The EMI figure was missed, and its line read as the hub, on the newer
+  card shape.** Spinny now also prints "EMI 15,916" (no "/m") beside a
+  "Save extra ₹19.5K on" promotion. The pattern required "/m", so the
+  canary runs of 2026-10-08, -10 and -15 read no EMI on any card, and
+  "EMI 15,916" (it has a comma) became the `hub`. Both wordings are read
+  now and the promotion is not taken for the `tag`; a fixture cut from the
+  2026-10-15 canary run pins the values.
+- **The canary was red on merchandising and green on nothing.** Its floors
+  on the share of rows with an EMI, and on "a strike price always comes
+  with the site's own discount figure" (on 2026-10-10 the site printed 20
+  strike prices without one), failed complete, fully priced runs. They are
+  replaced by parser invariants: EMI-box text never lands in another
+  column, and where both figures are printed they agree. The assertions
+  moved to `.github/canary_check.py`, which can be run against a downloaded
+  artefact. Exit 5 used to end green with a warning, though a navigation
+  timeout from the runner exits 5 too; it now fails.
+- **The credential scan could scan nothing and say ok.** Its excluded
+  directory names were compared against the absolute path, so a clone under
+  any directory called `venv` scanned 0 files. They are compared relative
+  to the repo root now, a scan of 0 files fails, and `.env*` backups,
+  `.json`, `.csv`, `.html` and `--dump-html` page dumps are read too.
+- **Root-level HTML dumps, `NAME.pageN` dumps and `live/`-style working
+  directories were not gitignored.**
+- **The HTTP status was dropped before classification.** Playwright and
+  pyppeteer now pass the navigation's status, so a 404 or a non-200 answer
+  is judged by what the server said. Selenium exposes no status and keeps
+  relying on the page's own 404 copy.
+- Comments and docs no longer cite private notes by section number; the
+  rule is stated in place. The README names the 2Captcha Scraping Browser
+  API and describes exit 5 as "the content was never obtained".
 
 - **`--retries 0` fetched nothing and called it a result.** The load loop is
   `range(1, retries + 1)`, so 0 never runs it and the engine judged

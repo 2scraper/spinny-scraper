@@ -553,7 +553,7 @@ def _solve_with_2captcha_v2(api_key: str, challenge: CaptchaChallenge,
 # with the endpoint constant it used. Nothing called it: this module has no
 # CLI, no engine consulted it before spending, and adding a paid API call to
 # every run to find out whether a run might spend anything would cost more
-# than it saved. A public helper with no consumer is the defect §17 names —
+# than it saved. A public helper with no consumer is dead code that looks load-bearing —
 # it reads like a feature and is not one — so it is removed rather than left
 # to look load-bearing. If a balance check is ever wanted, it belongs behind
 # a flag someone typed.
@@ -730,4 +730,4 @@ solve_recaptcha_v3 = solve_recaptcha
 # what the address has been doing — a narrow list is how a challenge gets
 # reported as an empty page months later. A solver for a challenge this site
 # has never been observed to serve is dead code; a DETECTOR for one is cheap
-# insurance. See the family note in CLAUDE.md.
+# insurance.

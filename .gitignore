@@ -24,6 +24,23 @@ live_results.zip
 *_debug.html
 *_debug.png
 *.html.page*
+# --dump-html NAME writes NAME itself on a one-page run and NAME.pageN on a
+# longer one, whatever NAME's own suffix is — so a dump at the repo root
+# (`canary_run.html`, `foo.html`) and a `dump.page2` both need covering.
+/*.html
+*.page[0-9]*
+
+# --- working directories, by KIND rather than by one name ---------------
+# A raw capture reaches `git add -A` through whichever directory nobody
+# listed. These are the names such directories are actually given.
+live/
+out/
+output/
+runs/
+results/
+tmp/
+scratch/
+dumps/
 
 # --- captures kept for parser work ---------------------------------------
 # The smoke suite's fixtures are committed (trimmed, inside smoke_test.py);
@@ -73,7 +90,7 @@ secrets*
 # recoverable only because that repo was private at the time. On 2026-09-17
 # a sibling had an untracked `.env.bak` holding a 32-hex key in a PUBLIC
 # repository, one `git add -A` from publication. Craigslist was fixed then
-# and the fix never reached anyone else, which is §16's rule unapplied: when
-# you fix one, check the siblings.
+# and the fix never reached anyone else: when you fix one, check the
+# siblings.
 .env*
 !.env.example

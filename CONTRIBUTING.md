@@ -109,8 +109,9 @@ Then the rest of the presentation, in the order that matters:
    is scheduled daily as well. The optional `SPINNY_CDP_ENDPOINT` secret,
    when set, routes the same run through the Scraping Browser API; no step is
    gated on it, so the canary keeps working the day it expires.
-2. The repo description, homepage and topics set (see the family notes on
-   what those should say).
+2. The repo description, homepage and topics set: a description naming what the site
+   publishes and the 2Captcha Scraping Browser API, the 2captcha.com
+   homepage, and topics people actually search for.
 3. Only then the row in the org profile README — and check it with an
    ANONYMOUS request rather than your own logged-in browser. A row pointing
    at a private repo is a 404 for every visitor, which costs more trust than

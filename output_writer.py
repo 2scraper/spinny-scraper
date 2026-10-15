@@ -542,10 +542,11 @@ def run_meta(status: str, stop_reason: str, pages_requested: int,
       failed   — nothing was gathered at all
 
     `mode` and `source` are recorded because `mode` is not implied by the
-    repo: the same output prefix can hold a listing run or a product run,
-    and those populate different columns — `sold` is a FLOOR on a listing
-    row and exact on a product row, so diffing one against the other would
-    report every row as changed. diff_runs.py refuses a pair whose modes or
+    repo: the same output prefix can hold a listing run or a detail run,
+    and those populate different columns — `km_driven` is the card's rounded
+    figure on a listing row while a detail row also carries `km_driven_exact`,
+    owners and registration, so diffing one against the other would report
+    every row as changed. diff_runs.py refuses a pair whose modes or
     sources differ. `source` is `spinny.com` on every row of every run here,
     since the site has one hostname and one currency; it is kept because
     consumers read these columns by name across the family.
