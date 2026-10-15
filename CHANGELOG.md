@@ -13,6 +13,8 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-15
+
 > **Behaviour change:** `--retries 0` is now a usage error (exit 2). It used
 > to be accepted and made the page-load loop unreachable, so nothing was
 > fetched and the engine reported the browser's own blank page as a result:
@@ -350,6 +352,7 @@ at all. It is kept because it is family core and is the right tool on sites
 whose grid is server-rendered — and because family core that exists in five
 repos and is exercised in four is how untested inheritance ships.
 
+[0.2.0]: https://github.com/2scraper/spinny-scraper/releases/tag/v0.2.0
 [0.1.2]: https://github.com/2scraper/spinny-scraper/releases/tag/v0.1.2
 [0.1.1]: https://github.com/2scraper/spinny-scraper/releases/tag/v0.1.1
 [0.1.0]: https://github.com/2scraper/spinny-scraper/releases/tag/v0.1.0
