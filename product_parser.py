@@ -16,7 +16,7 @@ vehicle. The grid is fetched by client-side XHR after load and exists only in
 the rendered DOM.
 
 So the JSON-LD-first design the rest of this family uses has nothing to be
-first about on a listing, and §4's *fallback* — a URL pattern — is promoted
+first about on a listing, and the usual *fallback* — a URL pattern — is promoted
 to primary because there is nothing above it. Every car in the grid is
 wrapped in an `<a href="/buy-used-cars/{city}/{make}/{model}/{trim}-{year}/{id}/">`,
 705 of 705 across three captures, and that path is a contract with search
@@ -64,8 +64,8 @@ What the site DOES label, and what the reads anchor on:
 
 **`data-label` is not a car id.** It is the shortlist button's label, and on
 CTA buttons inside the same grid it holds `loan-learn-more`, `Buy Back` and
-`notify-btn`. Anchoring on it would let a junk element steal a real car's row
-(§4). The id comes from the URL; `data-label` is only ever used as a
+`notify-btn`. Anchoring on it would let a junk element steal a real car's row.
+The id comes from the URL; `data-label` is only ever used as a
 cross-check, and it agreed on 705 of 705.
 
 **Four prices per car, and they disagree by up to ₹300,000.** See the note at
@@ -110,7 +110,7 @@ HOSTS = ("spinny.com", "www.spinny.com")
 
 # Hosts that look like they belong and do not. Refuse them WITH THE REASON:
 # "is not a Spinny site" would be false for a Spinny subdomain that simply is
-# not the storefront, and sends the reader hunting for a typo (§5).
+# not the storefront, and sends the reader hunting for a typo.
 UNSUPPORTED: Dict[str, str] = {
     "api.spinny.com":     "is Spinny's JSON API, not a page — this scraper "
                           "drives a browser and reads the rendered grid",
@@ -132,7 +132,7 @@ CURRENCY = "INR"
 
 # The cities Spinny sells in, taken from the site's OWN footer rather than
 # guessed — 33 `/used-cars-in-{city}/s/` links on a detail page captured
-# 2026-09-11. §5 says to read this off the site and then CHECK it, and the
+# 2026-09-11. Read off the site and then CHECKED, and the
 # check matters here: `delhi-ncr` is in the list and is a REGION, not a city.
 # A /used-cars-in-delhi-ncr/ listing returned cars whose own city segments
 # were delhi, gurgaon, ghaziabad, noida, faridabad, sonipat and karnal.
@@ -231,15 +231,15 @@ SELECTORS = {
     "card_text": 'span[data-base-component="text"]',
     "card_heading": 'h3',
     # The listing's own advertised total: `<span>1559</span><h1>Used cars in
-    # Delhi NCR</h1>`. This is the completeness oracle (§8) — 482 rows
+    # Delhi NCR</h1>`. This is the completeness oracle — 482 rows
     # against an advertised 1559 is arithmetic proof the scroll stopped
     # early, needing no threshold.
     "heading_content": '[data-componentname="HeadingContent"]',
 }
 
 # How many car links mean "the grid rendered". Must be > 1: waiting for a
-# single match resolves on an unrelated link long before the grid paints
-# (§5). Spinny hydrates ~20 cars per batch and 22 were present in the DOM
+# single match resolves on an unrelated link long before the grid paints.
+# Spinny hydrates ~20 cars per batch and 22 were present in the DOM
 # the moment the first batch landed, so 4 is reached immediately on a real
 # listing and never on an empty one.
 MIN_CARD_MATCHES = 4
@@ -280,7 +280,7 @@ _SCALE_WORDS = {
 # A written amount: digits with optional grouping separators and an optional
 # decimal part. Space grouping is included with all four of the space
 # characters a rendered page uses, because a no-break variant is what keeps a
-# number from wrapping and missing them parses "1 234" as 234 (§4).
+# number from wrapping and missing them parses "1 234" as 234.
 _GROUP_SPACES = "    "
 _AMOUNT = r'\d[\d,.' + _GROUP_SPACES + r']*'
 
@@ -311,12 +311,12 @@ _RUPEE_RE = re.compile(
 # There was an `_RS_RE` here for "Rs. 1.65 Lakh" in a page title, and it is
 # gone: nothing read it, and `scaled_price` already returns 165000.0 for
 # that string because the SCALE WORD is what it anchors on and the "Rs."
-# lead-in is not in the way. A second pattern with no consumer is the defect
-# §17 names — prose that reads like enforcement while nothing enforces it.
+# lead-in is not in the way. A second pattern with no consumer is dead
+# code — prose that reads like enforcement while nothing enforces it.
 
 # Percentages come out of the text BEFORE prices are matched, never after. A
 # rejected match has still consumed the currency symbol, so filtering
-# afterwards loses the real price too (§4). Spinny has not been observed
+# afterwards loses the real price too. Spinny has not been observed
 # printing a percentage inside a card — its discount badge is in rupees —
 # but the guard costs one substitution and the sibling repo that skipped it
 # read a 25,999 TRY product as costing 10.34.
@@ -324,10 +324,27 @@ _PCT_RE = re.compile(r'-?\s*\d{1,3}(?:[.,]\d+)?\s*%')
 
 # An EMI line lives INSIDE the card, right next to the price: "EMI6,675/m*".
 # On a sibling site exactly this shape made a price read return a monthly
-# payment (§4). Here the price is read from its own labelled node rather than
+# payment. Here the price is read from its own labelled node rather than
 # from the card's text, so the EMI cannot be mistaken for it — but the EMI is
 # also worth having, so it gets its own pattern instead of being stripped.
-_EMI_RE = re.compile(r'EMI\s*(' + _AMOUNT + r')\s*/\s*m', re.I)
+#
+# The "/m" suffix is OPTIONAL. Measured on the canary's own captures: on
+# 2026-10-14 the line read "EMI 18,833/m *" on 62 of 62 cards, while on
+# 2026-10-08, -10 and -15 it read "EMI 15,916" (no "/m", no asterisk) on 82
+# to 102 cards a run, beside a new promotion in the same box (below). A
+# pattern that required "/m" read 0 EMIs on those days, and the unmatched
+# "EMI 15,916" — which has a comma in it — was then taken for the HUB.
+# Anchored at the start so a free-text tag that merely mentions EMI is not
+# read as one.
+_EMI_RE = re.compile(r'^EMI\s*(' + _AMOUNT + r')(?:\s*/\s*m(?:onth)?)?\s*\*?$',
+                     re.I)
+
+# The promotion printed beside the EMI in the newer card shape: "Save extra
+# ₹19.5K on" (101 of 102 cards on 2026-10-15, "₹1.1L" on one). It is a
+# marketing line about financing, not a fact about the car, so it is
+# recognised and dropped rather than left over — left over, it became the
+# row's editorial `tag`.
+_EMI_PROMO_RE = re.compile(r'^Save\s+extra\b.*\bon$', re.I)
 
 # "63.5K km" / "117K km" / "980 km". The K suffix is the site's own rounding
 # and is why `km_driven` is documented as approximate.
@@ -552,7 +569,7 @@ def _slug_display(slug: Optional[str]) -> Optional[str]:
     MAKE_DISPLAY). A model name's casing is genuinely inconsistent on the
     site itself — "Grand i10" in a headline, "grand-i10" in a URL, "Grand
     i10" in the API — so anything cleverer here would be inventing a
-    convention the site does not have. §13 calls inconsistent brand casing a
+    convention the site does not have. Inconsistent brand casing is a
     trap worth documenting rather than one worth fixing.
     """
     if not slug:
@@ -732,17 +749,17 @@ def unknown_city_warning(url: str) -> Optional[str]:
 # `link[rel=next]`, zero `page=` hrefs, no "Load more" and no numbered
 # anchors on a fully scrolled 15 MB capture.
 #
-# This is the §7 failure in its most dangerous form. A `page_url()` that
+# This is the silent-single-page failure in its most dangerous form. A `page_url()` that
 # built `?page=N` unconditionally would fetch page one N times, find no new
 # id after the first, conclude the listing was exhausted, and report a
 # **complete** run holding one twentieth of a Delhi catalogue. Every layer of
-# §7's defence except the last would pass: the selector layer finds nothing
+# the pagination defence except the last would pass: the selector layer finds nothing
 # (correct), the constructed-URL layer builds something that returns 200
 # (wrong), and only the data layer — "this page added no new sku" — notices.
 #
 # So `paginates_by_url` is False for every URL on this site, `page_url`
 # returns None above page 1, and the engines scroll one long page instead.
-# `--concurrency` above 1 is refused with that reason (§18): page 5 of an
+# `--concurrency` above 1 is refused with that reason: page 5 of an
 # infinitely scrolling grid has no address to hand a worker.
 PAGE_PARAM = "page"
 PAGINATED_KINDS: Tuple[str, ...] = ()
@@ -823,7 +840,7 @@ def category_from_url(url: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Spinny gives a refused request no branded page to detect — the development
 # machine never met a refusal at all, from either exit tested — so detection
-# here is INVERTED, per §8 and §18: look for a marker every REAL page carries
+# here is INVERTED: look for a marker every REAL page carries
 # and treat its absence as the signal. A served page is assembled out of the
 # site's own assets; an interstitial, and Chromium's own network-error page,
 # are not.
@@ -858,10 +875,10 @@ _ASSET_MIN_MATCHES = 10
 # So `recaptcha`, `g-recaptcha`, `grecaptcha-badge` and
 # `recaptcha/api.js`-style loader markers are facts about the site, not
 # markers of a block — and a marker that matches every page is worse than no
-# marker (§18, proven twice on a sibling site in two consecutive releases).
+# marker (proven twice on a sibling site in two consecutive releases).
 # The sibling repos' lists contain `g-recaptcha` and `recaptcha/api.js` and
 # were copied here; both were REMOVED after counting them on a page known
-# good, which is the check §18 asks for.
+# good, which is the check every new marker needs.
 #
 # What IS a signal is a challenge actually RENDERED, which v3-invisible never
 # is on a served page: the anchor and bframe iframes of a v2 or of an
@@ -889,10 +906,10 @@ BOT_CHALLENGE_MARKERS = (
 # Spinny wires reCAPTCHA Enterprise v3 with sitekey
 # `6Lc_rqYoAAAAAHwcTbMntlDkC52H6QAYgYE7eUKp`, loaded as
 # `enterprise.js?render=<sitekey>`. `render=<sitekey>` means v3;
-# `render=explicit` would mean v2 (§8). It is present and invisible on every
+# `render=explicit` would mean v2. It is present and invisible on every
 # page, and no challenge has ever been rendered into it.
 #
-# So the machinery is configured everywhere and fires nowhere, which is §18's
+# So the machinery is configured everywhere and fires nowhere, which is
 # "no challenge rendered is not no captcha configured" exactly. What this
 # function is for is telling the solver WHICH task type to buy if one ever
 # appears: an enterprise v3 score task, not a v2 checkbox, and the two are
@@ -908,7 +925,7 @@ def recaptcha_config(html: str) -> Optional[Dict[str, str]]:
     Returns {"sitekey", "version", "enterprise"}. Present on every page
     Spinny serves; `version` is "v3" when the loader carries a sitekey in
     `render=` and "v2" when it carries `explicit`, which is the loader-wins
-    reconciliation §8 describes.
+    reconciliation: the loader wins over the wrapper's declaration.
     """
     for m in _RECAPTCHA_LOADER_RE.finditer(html or ""):
         render = m.group("render")
@@ -932,7 +949,7 @@ def _strip_extension_tags(html: str) -> str:
     own captcha hunters into every page it loads, and its markup mentions the
     vendors it hunts — including `cf-turnstile`, which is why a sibling
     repo's first live run reported exit 3 on a 1.8 MB page holding the full
-    catalogue (§8).
+    catalogue.
     """
     return _EXTENSION_TAG_RE.sub(" ", html or "")
 
@@ -946,7 +963,7 @@ def _strip_scripts(html: str) -> str:
         no_car_found_data: "Oops. No cars found for your search"
 
     So a text search for that sentence matches a page holding 482 cars — the
-    §18 trap again, arriving through a JS blob rather than a vendor script.
+    count-it-on-a-good-page trap again, arriving through a JS blob rather than a vendor script.
     Measured: "No cars found" appears once in the raw markup of every listing
     capture including the full Delhi one, and ZERO times in any of them once
     scripts are removed.
@@ -960,7 +977,7 @@ def _strip_scripts(html: str) -> str:
 # Spinny's own not-found page. It answers HTTP 404, carries its own branding
 # and three asset references, and says so in plain English. Detected by its
 # OWN copy rather than by the asset threshold, because it IS a Spinny page —
-# §17's ordering rule: a marker only the real page can carry outranks a
+# the ordering rule: a marker only the real page can carry outranks a
 # threshold, whichever is cheaper to check.
 _NOT_FOUND_MARKERS = (
     "Spinny | Not Found Page",
@@ -974,7 +991,8 @@ _NOT_FOUND_MARKERS = (
 # alert-signup card where the grid would be.
 #
 # **There is exactly one signal for it, and it is arithmetic: the heading's
-# own count reading 0.** No text marker survives §18's test.
+# own count reading 0.** No text marker survives being counted on a
+# page known to be good.
 #
 # The obvious candidates were tried and all three failed it. Spinny's
 # no-results sentence ("Oops. No cars found for your search") ships inside
@@ -985,7 +1003,7 @@ _NOT_FOUND_MARKERS = (
 # of a FILTERED listing rather than an empty one: it appears once on the
 # zero-result Volvo page and once on the luxury listing that rendered 41
 # cars, and not at all on the two unfiltered city listings. Counted on a page
-# known good, exactly as §18 requires, and discarded on the strength of that
+# known good, as every candidate marker must be, and discarded on the strength of that
 # count.
 #
 # So the count it is. It is the site's own arithmetic, it cannot appear on a
@@ -1001,7 +1019,7 @@ def total_available(html: str, shown: int = 0) -> Optional[int]:
     """The total Spinny itself advertises for this listing, or None.
 
     Read from the site's own heading — `<span>1559</span><h1>Used cars in
-    Delhi NCR</h1>` — and this is the completeness oracle §8 asks for. A run
+    Delhi NCR</h1>` — and this is the completeness oracle. A run
     that gathered 482 rows against an advertised 1559 is PARTIAL by
     arithmetic, with no threshold and no guess involved.
 
@@ -1061,7 +1079,7 @@ def total_pages(html: str) -> Optional[int]:
 def detect_bot_challenge(html: str, url: str = "") -> Optional[str]:
     """The name of a challenge vendor found in the markup, or None.
 
-    Broad on purpose (§8) — different geos and scenarios surface different
+    Broad on purpose — different geos and scenarios surface different
     challenges, and a detection is only a warning unless the page also has no
     cars on it. But NOT so broad that it matches the site's own invisible
     reCAPTCHA, which is on every page: see BOT_CHALLENGE_MARKERS.
@@ -1078,7 +1096,7 @@ def detect_bot_challenge(html: str, url: str = "") -> Optional[str]:
 def served_by_spinny(html: str) -> bool:
     """Whether this markup is a page Spinny itself built.
 
-    Inverted detection (§8, §18). Worth having even where no block page has
+    Inverted detection. Worth having even where no block page has
     been observed, because it is the only thing that classifies **Chromium's
     own network-error page** correctly — on a sibling site that page carried
     `<title>www.tokopedia.com</title>`, so a title check called it real, and
@@ -1094,8 +1112,8 @@ def is_not_found(html: str, status: Optional[int] = None) -> bool:
     """Whether this is Spinny's own 404 page.
 
     The status is the primary signal where a driver exposes one — Playwright
-    does, pyppeteer and Selenium do not at the point this is called — and the
-    page's own copy is the structural fallback, so all three engines agree.
+    and pyppeteer do, Selenium does not — and the page's own copy is the
+    structural fallback, so all three engines agree.
     """
     if status == 404:
         return True
@@ -1111,7 +1129,7 @@ def is_no_results(html: str) -> bool:
     The site's own heading count reading exactly 0 — see the note above
     `_NO_RESULTS_MARKERS` for why nothing textual is used here. The empty
     marker tuple is still consulted so that a future marker which DOES pass
-    §18's count-it-on-a-good-page test can be added in one place.
+    the count-it-on-a-good-page test can be added in one place.
     """
     if not html:
         return False
@@ -1134,7 +1152,7 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
     retry/solve/blocked decision that follows lives in
     `page_flow.STATE_POLICY` as data.
 
-    **The order of these checks is the whole design**, per §17: signals are
+    **The order of these checks is the whole design**: signals are
     ordered by how much they PROVE, not by how cheap they are. Spinny's own
     404 copy and its own zero-count heading are unambiguous positives that
     only a real Spinny page can carry, so they outrank the asset-reference
@@ -1193,7 +1211,7 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
     #    If not, Spinny did not build it — an interstitial, or the browser's
     #    own error page.
     #
-    #    It sits BELOW the three checks above because of §17's ordering rule:
+    #    It sits BELOW the three checks above because of the ordering rule:
     #    signals go in order of how much they PROVE, and a threshold is
     #    always weaker than a marker only the real page can carry. Cars in
     #    the site's own grid container, the site's own car JSON-LD and the
@@ -1271,7 +1289,7 @@ def _cards(soup, url: str = "") -> List:
         # A card that CONTAINS another card would double-count its child.
         # Not observed on any capture — Spinny's cards are siblings — but one
         # nested card would otherwise add a row holding its parent's data,
-        # which is §4's tile-scoping failure from the other direction.
+        # which is the tile-scoping failure from the other direction.
         if card.find(attrs={"data-base-component": "card"}) is not None:
             continue
         out.append(card)
@@ -1353,6 +1371,8 @@ def _card_fields(card) -> Dict[str, object]:
             if val is not None:
                 found["emi_monthly"] = int(round(val))
             continue
+        if _EMI_PROMO_RE.match(text):
+            continue
         if text.lstrip().startswith(("₹", "₹")) and found["discount_amount"] is None:
             found["discount_amount"] = rupee_amount(text)
             continue
@@ -1385,7 +1405,7 @@ def _card_price(card) -> Tuple[Optional[float], Optional[float]]:
     Both come from LABELLED nodes rather than from the card's text, which is
     what keeps the EMI line — "EMI6,675/m", inside the same card — from ever
     being read as the price. A sibling site's price node contained its own
-    instalment line and that is exactly the bug it caused (§4).
+    instalment line and that is exactly the bug it caused.
 
     The strike is taken from inside the card only. A detail page's "Similar
     cars" strip carries strikes belonging to other cars, and scoping is the
@@ -1422,7 +1442,7 @@ def _card_image(card) -> Optional[str]:
     against: Spinny renders a real `assets.spinny.com` URL into `src` on
     every card in the grid, 705 of 705, painted or not. The host is still
     checked positively — a populated column of icon URLs is the failure mode
-    §10 warns about — and a protocol-relative `//assets.spinny.com/...` is
+    a coverage check cannot see — and a protocol-relative `//assets.spinny.com/...` is
     made absolute, because that is how the site writes it.
     """
     img = card.select_one("img[src]")
@@ -1657,7 +1677,7 @@ def _report_coverage(rows: Sequence[Product], url: str) -> None:
 #   2. `@type` is a LIST — `["Product", "Car"]` — so a reader comparing
 #      `@type == "Product"` finds nothing.
 #
-# And the §4 shapes that are legal schema.org and crash a naive parser apply
+# And the JSON-LD shapes that are legal schema.org and crash a naive parser apply
 # here too: `offers` can legally be null or a list, `image` can be an
 # ImageObject, and products can sit under `@graph`. All are handled.
 _JSONLD_RE = re.compile(
@@ -1721,7 +1741,7 @@ def _offer_of(node: dict) -> Optional[dict]:
     """The car's Offer, whatever legal shape it takes.
 
     `"offers": null` is legal schema.org and an explicit null is NOT covered
-    by a `.get()` default — that only applies to a MISSING key (§4). A list
+    by a `.get()` default — that only applies to a MISSING key. A list
     of offers, possibly containing non-dicts, is legal too.
     """
     offers = node.get("offers")
@@ -1751,7 +1771,7 @@ def _offer_price(offer: Optional[dict]) -> Optional[float]:
 
 
 def _jsonld_image(node: dict) -> Optional[str]:
-    """The car's image, in any of the four legal shapes (§4).
+    """The car's image, in any of the four legal shapes.
 
     Normalised to https, because the JSON-LD writes `http://assets.spinny.com/…`
     where a listing card writes `//assets.spinny.com/…`. Left as two
@@ -1983,7 +2003,7 @@ def parse_detail_page(html: str, url: str,
         brand=brand or make_display(make_slug),
         price=price,
         # From the site's own `priceCurrency` when it states one — a FACT at
-        # the top of §4's trustworthiness order, never overwritten from the
+        # the top of the currency trustworthiness order, never overwritten from the
         # DOM. Falls back to INR only when a price was found and the page
         # stated no currency.
         currency=currency or (CURRENCY if price is not None else None),

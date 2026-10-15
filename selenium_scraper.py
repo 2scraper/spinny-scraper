@@ -1050,14 +1050,14 @@ def parse_args():
                         "insurance details — the columns a listing card "
                         "cannot carry. No --pages in detail mode.")
     p.add_argument("--category", default=None, help="Label to tag output rows with.")
-    p.add_argument("--pages", type=int, default=1,
+    p.add_argument("--pages", type=page_flow.pages_arg, default=1,
                    help="How many BATCHES of 20 cars to gather. A SCROLL "
                         "budget, not a URL plan: a Spinny listing has no "
                         "per-page addresses — ?page=N returns page 1 under "
                         "HTTP 200 — so batch N is reached by scrolling one "
                         "long page.")
-    p.add_argument("--delay", type=float, default=2.0, help="Delay between pages, seconds")
-    p.add_argument("--concurrency", type=int, default=1, metavar="N",
+    p.add_argument("--delay", type=page_flow.delay_arg, default=2.0, help="Delay between pages, seconds")
+    p.add_argument("--concurrency", type=page_flow.concurrency_arg, default=1, metavar="N",
                    help="Accepted and REFUSED with the reason, in every "
                         "engine: page 5 of an infinitely scrolling grid has "
                         "no address to hand a worker. Split the work across "
@@ -1067,7 +1067,7 @@ def parse_args():
                         "A page that comes back EMPTY is not retried: an SEO "
                         "landing page or a cityless URL having no grid is a "
                         "correct answer, not a fault.")
-    p.add_argument("--retry-delay", type=float, default=2.0,
+    p.add_argument("--retry-delay", type=page_flow.retry_delay_arg, default=2.0,
                    help="Seconds before the first retry, doubling thereafter")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
     p.add_argument("--out", default="spinny_products", help="Output file prefix")
@@ -1081,7 +1081,7 @@ def parse_args():
                         "Wins over --proxy.")
     p.add_argument("--proxy-rotate", choices=list(ROTATE_MODES), default="per-run")
     p.add_argument("--proxy-shuffle", action="store_true")
-    p.add_argument("--proxy-block-retries", type=int, default=2)
+    p.add_argument("--proxy-block-retries", type=page_flow.block_retries_arg, default=2)
     p.add_argument("--twocaptcha-key", default=None, help="2captcha.com API key")
     p.add_argument("--allow-empty", action="store_true",
                    help="Write output files even when 0 rows were found.")

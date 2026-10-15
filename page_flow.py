@@ -100,8 +100,8 @@ READY_SELECTOR_LISTING = (
 READY_SELECTOR_DETAIL = '[data-base-component="Pricing"]'
 
 # How many matches mean "the grid rendered". Must be > 1: waiting for a
-# single match resolves on an unrelated link long before the grid paints
-# (§5). Spinny's first batch is 22 cars and arrives whole, so 4 is reached
+# single match resolves on an unrelated link long before the grid paints.
+# Spinny's first batch is 22 cars and arrives whole, so 4 is reached
 # the moment it lands and is nowhere near a batch boundary.
 MIN_CARD_MATCHES = 4
 MIN_CARD_MATCHES_DETAIL = 1
@@ -129,7 +129,9 @@ def content_timeout_ms(mode: str) -> int:
 # ---------------------------------------------------------------------------
 # The lazy-load scroll — the only way any car is ever seen
 # ---------------------------------------------------------------------------
-# §8's rule, and every clause of it is confirmed by the measurement below.
+# Missing content is one of three things (not painted yet, lazy-loaded, or
+# a different page served to this session), and every clause of that is
+# confirmed by the measurement below.
 # Ten scroll rounds on /used-cars-in-delhi-ncr/s/, 2026-09-11:
 #
 #   cards   22  42  82 122 142 162 182 182 222 242 302
@@ -302,9 +304,10 @@ def classify(html: Optional[str], status: Optional[int] = None,
     """The page's state, in one place, for all three engines.
 
     `status` is OPTIONAL, and that default is load-bearing rather than tidy.
-    Playwright hands back a response object with a status on it; pyppeteer
-    and Selenium do not expose one at the point this is called, so they pass
-    only the markup. When `status` was required positionally in a sibling
+    Playwright and pyppeteer pass the status of the navigation's response;
+    Selenium's `driver.get()` returns nothing and its driver exposes no
+    status, so it passes only the markup and relies on the page's own 404
+    copy, which is why that copy is checked as well as the status. When `status` was required positionally in a sibling
     repo, both of those engines crashed with `TypeError` on their FIRST
     fetch — and that was invisible to import, to `--help`, to `compileall`,
     to the AST undefined-name walk and to 426 green offline checks, because
@@ -315,6 +318,11 @@ def classify(html: Optional[str], status: Optional[int] = None,
     """
     if html is None:
         return "blocked"
+    # Only a real integer is a status; anything else a driver hands back
+    # (None from a same-document navigation, a stub in a test) means "not
+    # known", never "not 200".
+    if isinstance(status, bool) or not isinstance(status, int):
+        status = None
     return detect_page_state(html, status, url)
 
 
@@ -388,7 +396,7 @@ def is_unpainted(state: str, html: Optional[str]) -> bool:
     navigation, filter rail and footer with a grid container and nothing in
     it.
 
-    §8 says missing content is one of three things — not painted,
+    Missing content is one of three things — not painted,
     lazy-loaded, or a different page served to this session. On Spinny every
     listing starts as the first and continues as the second, and neither
     wants a retry: a page the site plainly served, with no zero-count
@@ -413,7 +421,7 @@ def recaptcha_note() -> str:
     gating the listing on a score — which it has not been observed doing from
     either exit tested. So `recaptcha` and `g-recaptcha` are deliberately NOT
     in `product_parser.BOT_CHALLENGE_MARKERS`: a marker that matches every
-    page of the site it is meant to guard is worse than no marker (§18).
+    page of the site it is meant to guard is worse than no marker.
 
     Returned as a string rather than logged here so an engine can print it
     once, where a user asking "why didn't it solve the captcha" will see it.
@@ -433,7 +441,7 @@ def recaptcha_note() -> str:
 # far more likely to be a dead proxy exit than a scored address. Rotating is
 # exactly the right response to that.
 #
-# CONSULTED BY THE ENGINES, not decorative — §17 found a sibling repo's
+# CONSULTED BY THE ENGINES, not decorative — a sibling repo had an
 # identical constant with a paragraph of justification and no reader. The
 # offline suite asserts that every engine reads this one.
 RETRY_ON_BLOCKED = True
@@ -513,18 +521,18 @@ def block_retry_budget(has_pool: bool, retries: int) -> int:
 # `link[rel=next]`, zero `page=` hrefs, no "Load more" and no numbered
 # anchors on a fully scrolled 15 MB capture.
 #
-# This is §7's silent-single-page failure in its most dangerous form. A
+# This is the silent-single-page failure in its most dangerous form. A
 # `page_url()` used unconditionally would fetch page one N times, find no new
 # id after the first, conclude the listing was exhausted, and report a
-# COMPLETE run holding a twentieth of a Delhi catalogue. Three of §7's four
-# layers pass it: the selector layer finds nothing (correct), the constructed
+# COMPLETE run holding a twentieth of a Delhi catalogue. Three of the four
+# pagination defences pass it: the selector layer finds nothing (correct), the constructed
 # -URL layer builds something that returns 200 (wrong), and only "this page
 # added no new sku" notices.
 #
 # So the engines scroll one long page, and `--concurrency` above 1 is
 # refused with that reason.
 NEXT_PAGE_SELECTOR: List[str] = [
-    # Ordered most-durable first, per §5 — standards-based signals before
+    # Ordered most-durable first — standards-based signals before
     # build artefacts. NONE of these has ever matched on Spinny: the list is
     # here so that if the site ever grows real pagination markup the engines
     # pick it up, and every entry is honestly marked as unobserved.
@@ -569,7 +577,7 @@ def pagination_is_addressable(page1_url: str,
 # when it agrees with the URL convention" pair, and on this site neither can
 # ever return anything: `page_url` yields None above page 1, and no capture
 # of Spinny has ever carried a next-link to filter. Kept, they would have
-# been two policy functions with no consumer — the defect §17 names, where
+# been two policy functions with no consumer — dead code, where
 # the prose reads like enforcement and nothing enforces it.
 #
 # What survives is the pair that DOES have a reader in all three engines:
@@ -602,7 +610,7 @@ def completeness(rows_collected: int, html: Optional[str],
                  scroll: Optional[dict] = None) -> dict:
     """Whether the run got everything the listing says it has.
 
-    §8's "where the site publishes totals, a gap is arithmetic" — and Spinny
+    Where the site publishes a total, a gap is arithmetic — and Spinny
     does publish one, beside its own heading: "1559 Used cars in Delhi NCR".
     So 482 rows against an advertised 1559 is PROOF the scroll stopped early,
     with no threshold and no guess involved.
@@ -666,8 +674,8 @@ def listing_stop_reason(scroll: Optional[dict], completeness: Optional[dict],
         if advertised is not None and rows_collected < advertised:
             return "scroll_stalled"
         # The grid stopped growing and the site's own count agrees there was
-        # no more to get. That is the DATA-based terminating condition §7
-        # asks for rather than a selector's absence.
+        # no more to get. That is a DATA-based terminating condition
+        # rather than a selector's absence.
         return "no_new_products"
     # The round budget ran out with the page still growing. Partial, and it
     # has to say so: the missing tail would otherwise read as delisted cars
@@ -726,7 +734,7 @@ def comparable(url: str) -> str:
 # ---------------------------------------------------------------------------
 # --retries
 # ---------------------------------------------------------------------------
-import argparse as _argparse  # noqa: E402  (kept beside its only user)
+import argparse as _argparse  # noqa: E402  (kept beside its users)
 
 
 def attempts(value) -> int:
@@ -766,3 +774,36 @@ def attempts(value) -> int:
             f"With 0 the load loop never runs, nothing is fetched, and the "
             f"engine reports the browser's blank page as a result.")
     return number
+
+
+def numeric_type(flag, cast, minimum, unit):
+    """Build an argparse `type=` that rejects a value below `minimum`.
+
+    The message names the flag, because argparse prefixes it with the
+    argument's destination only, and a reader should not have to work out
+    which of several numeric flags was wrong.
+    """
+    def convert(value):
+        try:
+            number = cast(value)
+        except (TypeError, ValueError):
+            raise _argparse.ArgumentTypeError(
+                f"{flag} must be {unit}, not {value!r}")
+        if number != number or number < minimum:   # NaN fails both
+            raise _argparse.ArgumentTypeError(
+                f"{flag} must be at least {minimum}, not {value}")
+        return number
+    convert.__name__ = flag.lstrip("-").replace("-", "_")
+    return convert
+
+
+# Numeric flags every engine takes. Each one was accepted at any value before:
+# `--retry-delay -1` crashed the first retry with "sleep length must be
+# non-negative" (a traceback where a retry was due), and `--pages 0`,
+# `--concurrency 0` or a negative block-retry count ran with a meaning nobody
+# wrote down. Rejected up front, before any browser starts.
+pages_arg = numeric_type("--pages", int, 1, "a whole number")
+concurrency_arg = numeric_type("--concurrency", int, 1, "a whole number")
+block_retries_arg = numeric_type("--proxy-block-retries", int, 0, "a whole number")
+delay_arg = numeric_type("--delay", float, 0, "a number of seconds")
+retry_delay_arg = numeric_type("--retry-delay", float, 0, "a number of seconds")

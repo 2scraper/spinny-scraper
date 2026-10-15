@@ -32,7 +32,8 @@ attributes (`style`, `role`, `tabindex`, …) and nothing else; every
 `data-*` attribute, every class and every text node the parser reads is
 byte-for-byte what Spinny served.
 
-Six cards, each here because it pins a specific behaviour, named above it.
+Seven cards, each here because it pins a specific behaviour, named above it
+(six from 2026-09-11, one from the canary run of 2026-10-15).
 One detail page, reduced from 2.1 MB to its own ["Product","Car"] JSON-LD,
 its price node, its overview table and its inspection-report line.
 
@@ -291,6 +292,20 @@ DETAIL_URL = 'https://www.spinny.com/buy-used-cars/faridabad/hyundai/grand-i10/s
 DETAIL_PAGE = (
     '<html lang="en"><head><script type="application/ld+json">{"@context":"https://schema.org","@type":["Product","Car"],"name":"Hyundai Grand i10 Sportz 1.2 Kappa VTVT","description":"Used 63,417 Kms Driven 2019 Hyundai Grand i10 Sportz 1.2 Kappa VTVT for 3.9 Lakh in Sector-27, Faridabad. SPINNY inspected, SPINNY Star Price, free test drive.","model":"Grand i10","fuelType":"petrol","numberOfPreviousOwners":1,"modelDate":"2019-04-01T00:00:00.000Z","itemCondition":"https://schema.org/UsedCondition","vehicleModelDate":2019,"vehicleSeatingCapacity":5,"mileageFromOdometer":{"@type":"QuantitativeValue","value":63417,"unitCode":"KMT"},"color":"grey","image":"http://assets.spinny.com/sp-file-system/public/2026-09-09/5edaaa7256f6415894b1310837915707/raw/file.JPG","url":"https://www.spinny.com/buy-used-cars/faridabad/hyundai/grand-i10/sportz-12-kappa-vtvt-2019/31483859/","vehicleTransmission":"manual","brand":"Hyundai","productID":31483859,"manufacturer":{"@type":"organization","name":"Hyundai"},"offers":{"@type":"Offer","priceCurrency":"INR","Price":392000,"url":"https://www.spinny.com/buy-used-cars/faridabad/hyundai/grand-i10/sportz-12-kappa-vtvt-2019/31483859/","availability":"http://schema.org/InStock"},"additionalProperty":[{"@type":"PropertyValue","name":"RTO","unitText":"HR26"},{"@type":"PropertyValue","name":"Registration Year","unitText":2019},{"@type":"PropertyValue","name":"Registration Month","unitText":"August"}]}</script></head><body><img src="https://assets.spinny.com/x.jpg"/><span class="ds-heading ds-heading-large ds-heading-semibold ds-whitespace-nowrap ds-text-surface-text-gray-normal" data-base-component="Pricing"><svg aria-hidden="true" fill="none" focusable="false" height="0.714em" style="margin-right: 2px; vertical-align: baseline;" viewbox="0 0 17 28.56" width="0.425em"><path d="M7.44 28.56L0 15.56V13.44H1.32C2.6 13.44 3.69333 13.3067 4.6 13.04C5.50667 12.7733 6.22667 12.3467 6.76 11.76C7.29333 11.1467 7.62667 10.36 7.76 9.4H0V6.72H7.72C7.53333 5.81333 7.18667 5.06667 6.68 4.48C6.17333 3.86667 5.49333 3.41333 4.64 3.12C3.78667 2.82667 2.76 2.68 1.56 2.68H0V0H17V2.68H9.8C10.36 3.18667 10.8267 3.77333 11.2 4.44C11.5733 5.10667 11.8133 5.86667 11.92 6.72H17V9.4H12C11.8133 11.3467 11.0667 12.8667 9.76 13.96C8.48 15.0533 6.8 15.76 4.72 16.08L12.44 28.56H7.44Z" fill="currentColor"></path></svg>3.88 Lakh</span><div class="ds-flex ds-flex-wrap ds-relative" data-base-component="box" style="z-index: 1;"><div class="ds-py-3 ds-border-w-b-thinner" data-base-component="box" style="width: 33.3%; border-bottom-color: var(--ds-color-popup-border-subtle); border-bottom-style: solid;"><span class="ds-font-text ds-body-small ds-font-medium ds-text-surface-text-gray-muted" data-base-component="text">Make Year</span><div class="ds-flex ds-items-center ds-flex-wrap ds-gap-x-1" data-base-component="box" style="width: 90%;"><span class="ds-font-text ds-body-medium ds-font-medium ds-capitalize ds-text-surface-text-gray-normal" data-base-component="text">Apr 2019</span></div></div><div class="ds-py-3 ds-border-w-b-thinner" data-base-component="box" style="width: 33.3%; border-bottom-color: var(--ds-color-popup-border-subtle); border-bottom-style: solid;"><span class="ds-font-text ds-body-small ds-font-medium ds-text-surface-text-gray-muted" data-base-component="text">Registration Year</span><div class="ds-flex ds-items-center ds-flex-wrap ds-gap-x-1" data-base-component="box" style="width: 90%;"><span class="ds-font-text ds-body-medium ds-font-medium ds-capitalize ds-text-surface-text-gray-normal" data-base-component="text">Aug 2019</span></div></div><div class="ds-py-3 ds-border-w-b-thinner" data-base-component="box" style="width: 33.3%; border-bottom-color: var(--ds-color-popup-border-subtle); border-bottom-style: solid;"><span class="ds-font-text ds-body-small ds-font-medium ds-text-surface-text-gray-muted" data-base-component="text">Fuel Type</span><div class="ds-flex ds-items-center ds-flex-wrap ds-gap-x-1" data-base-component="box" style="width: 90%;"><span class="ds-font-text ds-body-medium ds-font-medium ds-capitalize ds-text-surface-text-gray-normal" data-base-component="text">petrol (BSIV)</span></div></div><div class="ds-py-3 ds-border-w-b-thinner" data-base-component="box" style="width: 33.3%; border-bottom-color: var(--ds-color-popup-border-subtle); border-bottom-style: solid;"><span class="ds-font-text ds-body-small ds-font-medium ds-text-surface-text-gray-muted" data-base-component="text">Km driven</span><div class="ds-flex ds-items-center ds-flex-wrap ds-gap-x-1" data-base-component="box" style="width: 90%;"><span class="ds-font-text ds-body-medium ds-font-medium ds-normal-case ds-text-surface-text-gray-normal" data-base-component="text">63K km</span></div></div><div class="ds-py-3 ds-border-w-b-thinner" data-base-component="box" style="width: 33.3%; border-bottom-color: var(--ds-color-popup-border-subtle); border-bottom-style: solid;"><span class="ds-font-text ds-body-small ds-font-medium ds-text-surface-text-gray-muted" data-base-component="text">Transmission</span><div class="ds-flex ds-items-center ds-flex-wrap ds-gap-x-1" data-base-component="box" style="width: 90%;"><span class="ds-font-text ds-body-medium ds-font-medium ds-capitalize ds-text-surface-text-gray-normal" data-base-component="text">manual (regular)</span><i class="DesktopOverview__infoIcon" role="none"><svg height="16" viewbox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><g fill="none" fill-rule="evenodd"><g><g><path d="M0 0L24 0 24 24 0 24z" transform="translate(-27 -373) translate(27 373)"></path><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 15c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1s1 .45 1 1v4c0 .55-.45 1-1 1zm1-8h-2V7h2v2z" fill="#2e054e" fill-rule="nonzero" transform="translate(-27 -373) translate(27 373)"></path></g></g></g></svg></i></div></div><div class="ds-py-3 ds-border-w-b-thinner" data-base-component="box" style="width: 33.3%; border-bottom-color: var(--ds-color-popup-border-subtle); border-bottom-style: solid;"><span class="ds-font-text ds-body-small ds-font-medium ds-text-surface-text-gray-muted" data-base-component="text">No. of Owner</span><div class="ds-flex ds-items-center ds-flex-wrap ds-gap-x-1" data-base-component="box" style="width: 90%;"><span class="ds-font-text ds-body-medium ds-font-medium ds-capitalize ds-text-surface-text-gray-normal" data-base-component="text">1st Owner</span></div></div><div class="ds-py-3 ds-border-w-b-thinner" data-base-component="box" style="width: 33.3%; border-bottom-color: var(--ds-color-popup-border-subtle); border-bottom-style: solid;"><span class="ds-font-text ds-body-small ds-font-medium ds-text-surface-text-gray-muted" data-base-component="text">Insurance Validity</span><div class="ds-flex ds-items-center ds-flex-wrap ds-gap-x-1" data-base-component="box" style="width: 90%;"><span class="ds-font-text ds-body-medium ds-font-medium ds-capitalize ds-text-surface-text-gray-normal" data-base-component="text">Jul  2027</span></div></div><div class="ds-py-3 ds-border-w-b-thinner" data-base-component="box" style="width: 33.3%; border-bottom-color: var(--ds-color-popup-border-subtle); border-bottom-style: solid;"><span class="ds-font-text ds-body-small ds-font-medium ds-text-surface-text-gray-muted" data-base-component="text">Insurance Type</span><div class="ds-flex ds-items-center ds-flex-wrap ds-gap-x-1" data-base-component="box" style="width: 90%;"><span class="ds-font-text ds-body-medium ds-font-medium ds-capitalize ds-text-surface-text-gray-normal" data-base-component="text">Third Party</span></div></div><div class="ds-py-3 ds-border-w-b-thinner" data-base-component="box" style="width: 33.3%; border-bottom-color: var(--ds-color-popup-border-subtle); border-bottom-style: solid;"><span class="ds-font-text ds-body-small ds-font-medium ds-text-surface-text-gray-muted" data-base-component="text">RTO</span><div class="ds-flex ds-items-center ds-flex-wrap ds-gap-x-1" data-base-component="box" style="width: 90%;"><span class="ds-font-text ds-body-medium ds-font-medium ds-capitalize ds-text-surface-text-gray-normal" data-base-component="text">HR26</span></div></div><div class="ds-py-3 ds-border-w-b-none" data-base-component="box" style="width: 33.3%; border-bottom-color: var(--ds-color-popup-border-subtle); border-bottom-style: solid;"><span class="ds-font-text ds-body-small ds-font-medium ds-text-surface-text-gray-muted" data-base-component="text">Car Location</span><div class="ds-flex ds-items-center ds-flex-wrap ds-gap-x-1" data-base-component="box" style="width: 90%;"><span class="ds-font-text ds-body-medium ds-font-medium ds-capitalize ds-text-surface-text-gray-normal" data-base-component="text">Sector-27, Faridabad</span></div></div></div><div class="ds-font-text ds-body-small ds-font-regular ds-my-3 ds-text-surface-text-gray-muted" data-base-component="text">1573 parts evaluated by 5 automotive experts</div></body></html>'
 )
+# 33112227 — the NEWER card shape, cut from the canary's own run of
+# 2026-10-15 (the same shape served on 2026-10-08 and -10), trimmed the same
+# way as the cards above and verified to parse identically to the untrimmed
+# card. Two differences from the 2026-09-11 captures, both in the EMI box:
+# the line reads "EMI 15,916" with no "/m" and no asterisk, and a financing
+# promotion, "Save extra ₹19.5K on", sits beside it. The parser required
+# "/m" and so read no EMI on 0 of 82 to 102 cards those days, and the
+# unmatched "EMI 15,916" — it has a comma — was taken for the HUB.
+CARD_SLAVIA_EMI_PROMO_URL = 'https://www.spinny.com/used-cars-in-delhi-ncr/s/'
+CARD_SLAVIA_EMI_PROMO = (
+    '<div class="ds-rounded-medium ds-p-0 ds-bg-surface-background-gray-intense ds-mt-0 ds-mb-4 ds-mx-2 ds-relative ds-card-elev-none" data-base-component="card" data-componentname="CarListingDesktop" style="width: calc(33% - 16px); box-shadow: rgba(0, 0, 0, 0.1) 7px 7px 40px 0px;"><div class="ds-flex ds-flex-col" data-base-component="box"><div class="ds-rounded-medium ds-relative ds-bg-interactive-background-staticwhite-default" data-base-component="box" data-id=""><div class="ds-absolute ds-overflow-hidden ds-interactive" data-base-component="box"></div><div class="ds-absolute" data-base-component="box"><div data-base-component="box"><div class="ds-rounded-xlarge ds-flex ds-justify-center ds-items-center ds-relative ds-interactive" data-base-component="box" data-category="assured" data-label="33112227" data-price="952000" id="shortlist_icon"><div></div></div></div></div><div class="ds-relative ds-flex ds-justify-end" data-base-component="box"><div class="ds-absolute" data-base-component="box"></div><div class="ds-img-wrapper ds-img-shape-square"><img alt="Used 2022 Skoda Slavia Style 1.0L TSI AT Petrol Automatic Image" class="ds-img ds-img-fit-contain" decoding="async" fetchpriority="auto" loading="lazy" src="//assets.spinny.com/sp-file-system/public/2026-10-15/72b198604d0f4939bc380965553eeaea/raw/file.JPG"/></div></div><div><div class="ds-px-3 ds-pb-3" data-base-component="box" id="listing-detail-card-v2"><div class="ds-flex ds-justify-between ds-flex-col" data-base-component="box"><div class="ds-flex ds-justify-between ds-items-center" data-base-component="box"><a data-discover="true" href="/buy-used-cars/gurgaon/skoda/slavia/style-10l-tsi-at-2022/33112227/"><div class="ds-overflow-hidden" data-base-component="box"><h3 class="ds-heading ds-heading-small ds-heading-semibold ds-truncate-1 ds-text-surface-text-gray-normal" data-base-component="heading">2022 Skoda Slavia</h3></div></a><div class="ds-flex ds-items-center ds-justify-end ds-flex-row-reverse ds-ml-1 ds-gap-2" data-base-component="box"><span class="ds-heading ds-heading-small ds-heading-semibold ds-whitespace-nowrap ds-text-surface-text-gray-normal" data-base-component="Pricing">9.34 Lakh</span><span class="ds-font-text ds-body-small ds-font-regular ds-line-through ds-whitespace-nowrap ds-text-surface-text-gray-muted" data-base-component="Pricing">9.48 Lakh</span></div></div><div class="ds-flex ds-items-center ds-justify-between ds-gap-2 ds-mt-1" data-base-component="box" data-componentname="ListingModelEmiDetail"><div class="ds-overflow-hidden" data-base-component="box" data-componentname="ListingModelEmiDetail"><span class="ds-font-text ds-body-medium ds-font-regular ds-truncate-1 ds-text-surface-text-gray-subtle" data-base-component="text">Style 1.0L TSI AT</span></div><div class="ds-text-right ds-relative ds-ml-4 ds-flex ds-justify-end ds-items-end ds-flex-col ds-whitespace-nowrap" data-base-component="box" data-componentname="ListingModelEmiDetail"><div class="ds-flex ds-items-center ds-flex-nowrap ds-whitespace-nowrap ds-gap-2 ds-rounded-tl-small ds-rounded-bl-small ds-border-w-thin ds-relative" data-base-component="box" data-componentname="EmiSectionV2"><div class="ds-flex ds-items-center ds-rounded-tl-small ds-rounded-bl-small ds-rounded-tr-none ds-rounded-br-none ds-px-3" data-base-component="box"><span class="ds-flex ds-items-center" data-base-component="box"><span class="ds-font-text ds-body-xsmall ds-font-regular ds-text-interactive-text-information-normal" data-base-component="text">Save extra ₹19.5K on</span></span></div><div class="ds-flex ds-items-center" data-base-component="box"><span class="ds-font-text ds-body-medium ds-font-regular ds-text-surface-text-gray-subtle" data-base-component="text">EMI <span class="ds-font-text ds-body-medium ds-font-regular ds-whitespace-nowrap ds-text-surface-text-gray-subtle" data-base-component="Pricing">15,916</span></span></div></div></div></div></div><div class="ds-flex ds-flex-row ds-gap-3 ds-mt-2 ds-overflow-auto ds-relative" data-base-component="box"><span class="ds-badge ds-badge-medium ds-badge-neutral-subtle"><span class="ds-font-text ds-body-small ds-font-regular ds-text-surface-text-gray-normal ds-badge-label" data-base-component="text">39.5K km</span></span><span class="ds-badge ds-badge-medium ds-badge-neutral-subtle"><span class="ds-font-text ds-body-small ds-font-regular ds-text-surface-text-gray-normal ds-badge-label" data-base-component="text">Petrol</span></span><span class="ds-badge ds-badge-medium ds-badge-neutral-subtle"><span class="ds-font-text ds-body-small ds-font-regular ds-text-surface-text-gray-normal ds-badge-label" data-base-component="text">Automatic</span></span><span class="ds-badge ds-badge-medium ds-badge-neutral-subtle"><span class="ds-font-text ds-body-small ds-font-regular ds-text-surface-text-gray-normal ds-badge-label" data-base-component="text">HR98</span></span></div><div class="ds-flex ds-items-center ds-justify-between ds-mt-3 ds-gap-2" data-base-component="box"><section class="ds-flex ds-items-center ds-gap-2 ds-overflow-hidden" data-base-component="box" id="hub-details-card-v2"><div class="ds-bg-surface-text-gray-muted ds-rounded-round" data-base-component="box" id="dot-separator-card-v2"></div><div class="ds-overflow-hidden ds-whitespace-nowrap" data-base-component="box" id="car-hub-details"><span class="ds-font-text ds-body-small ds-font-regular ds-text-surface-text-gray-muted" data-base-component="text">Sohna Road, Gurgaon</span></div></section><div class="ds-flex ds-items-center" data-base-component="box" id="procurement-category-card-v2"></div></div></div></div><div aria-orientation="horizontal" class="ds-bg-surface-border-gray-subtle" data-base-component="box"></div><div class="ds-flex ds-rounded-bl-medium ds-rounded-br-medium ds-overflow-hidden ds-relative" data-base-component="box" id="card-footer"><section class="ds-flex ds-items-center ds-justify-between ds-gap-2 ds-py-2 ds-px-3 ds-box-border ds-bg-surface-background-gray-subtle" data-base-component="box"><div class="ds-flex ds-gap-3 ds-items-center ds-relative" data-base-component="box" id="availability-status-card-v2"><div class="ds-img-wrapper ds-img-shape-square"><img alt="upcoming" class="ds-img ds-img-fit-contain" decoding="async" fetchpriority="auto" loading="lazy" src="https://spn-sta.spinny.com/spinny-web/static-images/assets/images/components/CarListingCardV2New/components/CardFooter/components/AvailabilityStatus/assets/upcoming.svg"/></div></div></section></div><div class="ds-absolute" data-base-component="box"><div class="ds-flex ds-items-center ds-gap-2 ds-rounded-2xlarge ds-py-1 ds-px-2 ds-border-w-thick" data-base-component="box" id="GenericDiscountBadge"><span class="ds-font-text ds-body-small ds-font-regular" data-base-component="text">₹14,000</span></div></div></div></div></div>'
+)
+
+
 def _one(card_html, url):
     """Parse a single card fixture as the grid the site would serve it in."""
     rows = parse_products(grid(card_html), url)
@@ -304,6 +319,7 @@ ALL_CARDS = [
     ("CARD_EON", CARD_EON, CARD_EON_URL),
     ("CARD_E_CLASS", CARD_E_CLASS, CARD_E_CLASS_URL),
     ("CARD_RANGE_ROVER", CARD_RANGE_ROVER, CARD_RANGE_ROVER_URL),
+    ("CARD_SLAVIA_EMI_PROMO", CARD_SLAVIA_EMI_PROMO, CARD_SLAVIA_EMI_PROMO_URL),
 ]
 
 
@@ -380,7 +396,7 @@ def test_price_parsing():
 # Listing rows — pinned VALUES, on real cards
 # ---------------------------------------------------------------------------
 def test_listing_values():
-    group("listing rows: the exact values six real cards must produce")
+    group("listing rows: the exact values seven real cards must produce")
     ok = True
 
     r = _one(CARD_GRAND_I10, CARD_GRAND_I10_URL)
@@ -478,7 +494,26 @@ def test_listing_values():
                 r.category == "luxury-cars")
     ok &= check("Range Rover: luxury tier", r.assurance == "luxury")
 
-    # INVARIANTS ACROSS ALL SIX, checked as a set rather than one at a time.
+    # THE NEWER EMI BOX: "EMI 15,916" without "/m", beside a promotion.
+    r = _one(CARD_SLAVIA_EMI_PROMO, CARD_SLAVIA_EMI_PROMO_URL)
+    ok &= check("Slavia: EMI read without the '/m' suffix",
+                r.emi_monthly == 15916)
+    ok &= check("Slavia: the hub is the place, not the EMI line",
+                r.hub == "Sohna Road, Gurgaon")
+    ok &= check("Slavia: the financing promotion is not the tag",
+                r.tag is None)
+    ok &= check("Slavia: variant", r.variant == "Style 1.0L TSI AT")
+    ok &= check("Slavia: price and strike",
+                (r.price, r.original_price) == (934000.0, 948000.0))
+    ok &= check("Slavia: the site's own discount figure",
+                r.discount_amount == 14000.0)
+    ok &= check("Slavia: odometer, fuel, transmission, RTO",
+                (r.km_driven, r.fuel_type, r.transmission, r.rto)
+                == (39500, "Petrol", "Automatic", "HR98"))
+    ok &= check("an EMI pattern is anchored: a tag mentioning EMI is not one",
+                product_parser._EMI_RE.search("No-cost EMI 6,000 offer") is None)
+
+    # INVARIANTS ACROSS ALL CARDS, checked as a set rather than one at a time.
     rows = [_one(h, u) for _, h, u in ALL_CARDS]
     ok &= check("every card yields exactly one row", all(rows))
     ok &= check("every row has a price", all(r.price for r in rows))
@@ -659,7 +694,7 @@ def test_urls():
 
     # Refused WITH THE REASON. "is not a Spinny site" would be FALSE for
     # api.spinny.com and would send the reader hunting for a typo that is not
-    # there (§5).
+    # there.
     why = unsupported_reason("https://api.spinny.com/v3/api/listing/v3/")
     ok &= check("api.spinny.com is refused with its own reason",
                 why is not None and "API" in why)
@@ -962,7 +997,7 @@ def test_recaptcha_is_not_a_block_marker():
     group("the site's own reCAPTCHA is a fact about the site, not a marker")
     ok = True
 
-    # §18, and this is the check that rule asks for: COUNT A MARKER ON A PAGE
+    # The rule for markers, and this is the check it asks for: COUNT A MARKER ON A PAGE
     # YOU KNOW IS GOOD before adding it. Spinny loads reCAPTCHA Enterprise v3
     # on every page it serves — 31 occurrences of "recaptcha" on a capture
     # that had just delivered 482 cars — so `recaptcha` and `g-recaptcha` as
@@ -982,7 +1017,7 @@ def test_recaptcha_is_not_a_block_marker():
     ok &= check("...and no vendor marker fires on it",
                 detect_bot_challenge(good, LISTING_URL) is None)
 
-    # "No challenge rendered" is not "no captcha configured" (§18). What IS
+    # "No challenge rendered" is not "no captcha configured". What IS
     # read off the page is which task type a solve would have to buy — an
     # enterprise v3 score task, not a v2 checkbox, and the two are priced
     # and solved differently.
@@ -994,7 +1029,7 @@ def test_recaptcha_is_not_a_block_marker():
                 cfg and cfg["sitekey"].startswith("6Lc_rqYo"))
     # render=explicit means v2, and the LOADER wins over anything the
     # wrapper declares: v3 parameters bought for a v2 widget produce a token
-    # the site rejects (§8).
+    # the site rejects.
     v2 = recaptcha_config('<script src="https://www.google.com/recaptcha/'
                           'api.js?render=explicit"></script>')
     ok &= check("render=explicit reads as v2", v2 and v2["version"] == "v2")
@@ -1274,7 +1309,7 @@ def test_output_contract():
                  "seating_capacity", "insurance_validity", "insurance_type"])
     ok &= check("both modes map to a row class",
                 ROW_CLASS_BY_MODE == {"listing": Product, "detail": Product})
-    # A column that is null on every row of every run should not exist (§9).
+    # A column that is null on every row of every run should not exist.
     # These eight are null on every LISTING row and populated in --mode
     # detail, which is a different thing and is why they are kept — pinned
     # so that removing them needs a measurement rather than a hunch.
@@ -1561,7 +1596,7 @@ def test_pyppeteer_teardown_noise():
 
 
 def test_canary_separates_access_from_defect():
-    group("the canary fails on defects and only WARNS on access conditions")
+    group("the canary is green only when it tested the site")
     ok = True
     wf_path = os.path.join(REPO_ROOT, ".github", "workflows", "canary.yml")
     wf = open(wf_path, encoding="utf-8").read()
@@ -1593,10 +1628,10 @@ def test_canary_separates_access_from_defect():
     # new information and is failed rather than excused.
     #
     #   0  got in and parsed         -> pass, and the assertions then run
-    #   5  endpoint refused          -> ACCESS, and only possible when the
-    #      OPTIONAL Scraping Browser secret is set. `profile_locked` and an
-    #      expired credential both say nothing about the site, and this
-    #      canary does not need the secret at all.
+    #   5  content never obtained    -> FAIL. It used to be a warning on the
+    #      theory that only the optional Scraping Browser secret could cause
+    #      it, but a navigation timeout from the runner's own address exits 5
+    #      too, and a canary that went green on that had tested nothing.
     #   3  blocked before parsing    -> DEFECT, or news. See above.
     #   6  partial                   -> DEFECT: the target is 60 cars and the
     #      measured run passes it in two scroll rounds, so a partial means
@@ -1605,7 +1640,7 @@ def test_canary_separates_access_from_defect():
     #   2  bad arguments             -> DEFECT (in the workflow itself).
     #   4  served a page, ZERO rows  -> DEFECT, and precisely the regression
     #      this canary exists to catch: the card anchor moved.
-    expected = {0: "pass", 5: "warn",
+    expected = {0: "pass", 5: "fail",
                 1: "fail", 2: "fail", 3: "fail", 4: "fail", 6: "fail",
                 99: "fail"}
     for code, want in sorted(expected.items()):
@@ -1637,8 +1672,56 @@ def test_canary_separates_access_from_defect():
             got = failed and errored
         ok &= check("exit %-2d is treated as %s" % (code, want), got)
 
-    ok &= check("the reason access is not a defect is written down",
-                "ACCESS CONDITIONS ARE NOT DEFECTS" in wf)
+    ok &= check("the rule that only a tested run is green is written down",
+                "ONLY A RUN THAT TESTED THE SITE ENDS GREEN" in wf)
+
+    # THE DATA ASSERTIONS ARE A FILE, RUN BY THE WORKFLOW, AND THEY TEST THE
+    # PARSER. Two floors on merchandising (an EMI share and "a strike price
+    # always comes with the site's discount figure") turned the badge red on
+    # complete, fully priced runs; neither may come back.
+    cc_path = os.path.join(REPO_ROOT, ".github", "canary_check.py")
+    ok &= check("the canary runs .github/canary_check.py",
+                "python3 .github/canary_check.py canary_run" in wf
+                and os.path.exists(cc_path))
+    if os.path.exists(cc_path):
+        import importlib.util as _ilu
+        spec = _ilu.spec_from_file_location("_canary_check", cc_path)
+        cc = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(cc)
+        floors = dict(cc.CORE_FIELDS)
+        ok &= check("no floor on the EMI share, a merchandising choice",
+                    "emi_monthly" not in floors)
+        ok &= check("no floor on strike/discount shares",
+                    "original_price" not in floors
+                    and "discount_amount" not in floors)
+        # Run it: a healthy run of the newer card shape passes, and the same
+        # rows with the EMI line read as the hub (what the parser did on
+        # 2026-10-08/-10/-15) fail on the named invariant.
+        base = _one(CARD_SLAVIA_EMI_PROMO, CARD_SLAVIA_EMI_PROMO_URL)
+        rows = []
+        for i in range(60):
+            r = dataclasses_asdict(base)
+            r.update(sku=str(33112227 + i), page=1 + i // 20,
+                     position=1 + i % 20,
+                     url=r["url"].rsplit("/", 2)[0] + "/%d/" % (33112227 + i))
+            rows.append(r)
+        meta = {"pages_completed": 3, "status": "complete", "mode": "listing",
+                "scroll": {"reached_target": True},
+                "completeness": {"total_available": 1782}}
+        fail, _ = cc.check(rows, meta)
+        ok &= check("canary_check passes a healthy run of the newer cards",
+                    fail == [])
+        if fail:
+            print("        " + "; ".join(fail)[:400])
+        leaked = [dict(r, hub="EMI 15,916", emi_monthly=None) for r in rows]
+        fail, _ = cc.check(leaked, meta)
+        ok &= check("...and fails when the EMI line lands in the hub",
+                    any("EMI-box text" in f for f in fail))
+        no_badge = [dict(r, discount_amount=None, emi_monthly=None)
+                    for r in rows]
+        fail, _ = cc.check(no_badge, meta)
+        ok &= check("...and does NOT fail when the site prints no discount "
+                    "badge and no EMI", fail == [])
 
     # THIS CANARY IS SCHEDULED, and that too differs from its siblings for a
     # measured reason: it needs no credential, so there is none to expire.
@@ -1892,10 +1975,10 @@ def test_fingerprint_client_reads_env():
     # THE DEFECT THIS PINS, found the first time --fingerprint was run live
     # here and confirmed present in five sibling repos: `--key` defaulted to
     # `os.environ.get("TWOCAPTCHA_KEY")` alone. So a key put in `.env` —
-    # which is exactly what §3, the README and .env.example instruct — worked
+    # which is exactly what the README and .env.example instruct — worked
     # for every engine and failed HERE with "No API key". A documented
-    # mechanism not applied on one path, which is the shape of half the
-    # defects §16 lists.
+    # mechanism not applied on one path, which is the shape of many
+    # defects found in code copied between scrapers.
     src = inspect.getsource(fpc.main)
     ok &= check("it loads .env itself, rather than hoping an engine did",
                 "env_config.load_env()" in src)
@@ -1959,7 +2042,7 @@ def test_fingerprint_application():
     # possible, but it is not what this fingerprint describes, and a locale
     # that contradicts the rest of the identity is the mismatch again. This
     # was one of the six defects a sibling repo inherited from copied core
-    # and never ran (§16).
+    # and never ran.
     ok &= check("the locale is the fingerprint's own, not en-<country>",
                 kw.get("locale") == "en-IN")
     ok &= check("the timezone is carried, so the browser cannot contradict it",
@@ -2612,7 +2695,7 @@ def test_captcha():
     #
     #   `recaptcha` / `g-recaptcha` — inherited from the sibling repos and
     #   REMOVED here. Spinny loads reCAPTCHA Enterprise v3 on every page it
-    #   serves, so as markers they would make every good page blocked. §18's
+    #   serves, so as markers they would make every good page blocked. The
     #   rule, and the check that rule asks for: count it on a page you know
     #   is good before adding it.
     #
@@ -2698,7 +2781,7 @@ def test_env_config():
     # CONFIGURED, so `cp .env.example .env` and a run connected to
     # cb.2captcha.com with the string `{login}-zone-…` as its username and
     # got a 401 — a confusing failure a long way from its cause, which is
-    # what §3's rule exists to prevent.
+    # what reading placeholders as unset exists to prevent.
     for raw in ('ws://{login}-zone-scraping_browser-country-id-pid-'
                 '{profileId}:{password}@cb.2captcha.com:9222',
                 'http://{user}:{password}@ap.proxy.2captcha.com:2334',
@@ -2791,7 +2874,7 @@ def test_proxy_pool():
     # and the check that used to live here went with it. `--concurrency` is
     # refused on this site (page 5 of an infinitely scrolling grid has no
     # address to hand a worker), so a per-worker pool would be machinery with
-    # no caller: the defect §17 names, tested into looking load-bearing.
+    # no caller: dead code, tested into looking load-bearing.
     #
     # What replaces it is the rotation a SEQUENTIAL run actually uses. A pool
     # here spreads several runs, or several block-retries within one, rather
@@ -2869,7 +2952,7 @@ def test_proxy_pool():
     # was written to show. Every caller here passes the URL as its own `%s`
     # argument for that reason, and `_mask_credentials()` is what handles
     # arbitrary text. Asserting the CURRENT behaviour makes a future swap a
-    # failing check rather than an unreadable log (§10).
+    # failing check rather than an unreadable log.
     sentence = "a http://u:supersecret@h.example:8080 b"
     ok &= check("mask() on a sentence loses the host — the documented limit",
                 mask(sentence) == "?://?")
@@ -2994,7 +3077,7 @@ def test_engines(skips):
 
     # THE FLAG CONTRACT, and the exact ways the engines differ from it.
     #
-    # §9 lists the flags every engine must offer. Checked rather than
+    # The family's flag contract lists the flags every engine must offer. Checked rather than
     # trusted, because a flag one engine has and another does not is the
     # drift page_flow.py and finish_run() exist to prevent, one level up —
     # and because the README documents these differences by name, so a new
@@ -3034,7 +3117,7 @@ def test_engines(skips):
     # `--fp-tags` MUST DEFAULT TO ONE OS-FAMILY TAG. It shipped in this
     # family as "Windows,Chrome,Desktop", which the fingerprint API rejects
     # with HTTP 400 — so --fingerprint failed on every invocation, which is
-    # one of the six defects §16 of the family notes lists. Measured
+    # one of six defects found in copied fingerprint code. Measured
     # 2026-09-10 against the live API: `Windows` succeeds;
     # `Windows,Chrome,Desktop`, `Chrome` and `Desktop` each 400.
     for name in _ENGINE_MODULES:
@@ -3344,7 +3427,7 @@ def test_parse_is_gated_on_the_policy():
     # engine parsed whatever reached the parse line, so the `parse` column
     # of STATE_POLICY decided nothing and an engine could disagree with the
     # table — and with its twins — without anything noticing. That is the
-    # defect CLAUDE.md §17 names for constants, with a function instead.
+    # defect of a policy constant nothing reads, with a function instead.
     #
     # Measured across the family on 2026-09-23 by counting definitions
     # against readers: 7 of 24 repos defined it and none called it.
@@ -3429,6 +3512,180 @@ def test_retries_is_validated_in_every_entry_point():
     return check("--retries is validated in every entry point, so 0 is a usage error", not problems)
 
 
+def _load_ci_checks():
+    import importlib.util as _ilu
+    path = os.path.join(REPO_ROOT, ".github", "ci_checks.py")
+    spec = _ilu.spec_from_file_location("_ci_checks_probe", path)
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_credential_scan_reads_what_matters():
+    group("the credential scan: relative exclusions, backups, captures")
+    ok = True
+    if not os.path.exists(os.path.join(REPO_ROOT, ".github", "ci_checks.py")):
+        # The Docker image carries no .github; nothing to test there.
+        return check("ci_checks.py is absent with the whole .github dir",
+                     not os.path.isdir(os.path.join(REPO_ROOT, ".github")))
+    key = "a" * 32
+    with tempfile.TemporaryDirectory() as td:
+        # A clone that lives UNDER a directory called `venv`: exclusions
+        # tested against the absolute path scanned 0 files here and said ok.
+        root = os.path.join(td, "venv", "clone")
+        os.makedirs(os.path.join(root, "myenv", "lib"))
+        open(os.path.join(root, "myenv", "pyvenv.cfg"), "w").close()
+        planted = {"note.txt": key, ".env.bak": "TWOCAPTCHA_KEY=" + key,
+                   "dump.json": '{"k": "%s"}' % key,
+                   "foo.html": "<p>%s</p>" % key,
+                   "canary_run.json.page2": key}
+        for name, body in planted.items():
+            with open(os.path.join(root, name), "w") as fh:
+                fh.write(body + "\n")
+        # Inside a real virtualenv: must NOT be read.
+        with open(os.path.join(root, "myenv", "lib", "vendored.py"), "w") as fh:
+            fh.write("# %s\n" % key)
+
+        cc = _load_ci_checks()
+        cc.REPO = __import__("pathlib").Path(root)
+        cc._VENV_CACHE.clear()
+        with redirect_stdout(io.StringIO()):
+            found = cc.secret_check()
+        blob = "\n".join(found)
+        for name in planted:
+            ok &= check("a key planted in %s is found, under a `venv` parent"
+                        % name, (name + ":") in blob)
+        ok &= check("a directory holding pyvenv.cfg is still skipped",
+                    "vendored.py" not in blob)
+
+        empty = os.path.join(td, "empty")
+        os.makedirs(empty)
+        cc.REPO = __import__("pathlib").Path(empty)
+        cc._VENV_CACHE.clear()
+        with redirect_stdout(io.StringIO()):
+            found = cc.secret_check()
+        ok &= check("a scan that read 0 files FAILS instead of saying ok",
+                    any("0 files scanned" in f for f in found))
+    return ok
+
+
+def _public_files():
+    """Every file this repo publishes: git's index if there is one."""
+    try:
+        out = subprocess.run(["git", "ls-files"], cwd=REPO_ROOT,
+                             capture_output=True, text=True, check=True).stdout
+        names = [n for n in out.splitlines() if n]
+        if names:
+            return names
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    names = []
+    for dirpath, dirnames, filenames in os.walk(REPO_ROOT):
+        dirnames[:] = [d for d in dirnames
+                       if d not in (".git", "__pycache__")
+                       and not os.path.exists(os.path.join(dirpath, d, "pyvenv.cfg"))]
+        for f in filenames:
+            names.append(os.path.relpath(os.path.join(dirpath, f), REPO_ROOT))
+    return names
+
+
+def test_no_private_citations():
+    group("public files cite no private notes")
+    # Assembled from pieces so this file does not match itself.
+    banned = (chr(0xA7), "CLAUDE" + ".md", "claude_" + "2scraper",
+              "2scraper_" + "repo_rules", "play" + "book")
+    hits = []
+    for name in _public_files():
+        path = os.path.join(REPO_ROOT, name)
+        try:
+            text = open(path, encoding="utf-8").read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            for token in banned:
+                if token in line:
+                    hits.append("%s:%d (%r)" % (name, lineno, token))
+    for h in hits[:10]:
+        print("      " + h)
+    return check("no section-sign references or private file names in any "
+                 "published file (%d found)" % len(hits), not hits)
+
+
+def test_numeric_flags_are_validated():
+    group("numeric flags reject values that cannot mean anything")
+    import argparse as _ap
+    ok = True
+    want = {"--pages": "page_flow.pages_arg", "--delay": "page_flow.delay_arg",
+            "--retry-delay": "page_flow.retry_delay_arg",
+            "--concurrency": "page_flow.concurrency_arg",
+            "--proxy-block-retries": "page_flow.block_retries_arg",
+            "--retries": "page_flow.attempts"}
+    for eng in ENGINE_FILES:
+        tree = ast.parse(open(os.path.join(REPO_ROOT, eng), encoding="utf-8").read())
+        got = {}
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call)
+                    and getattr(node.func, "attr", "") == "add_argument"
+                    and node.args and isinstance(node.args[0], ast.Constant)
+                    and node.args[0].value in want):
+                got[node.args[0].value] = next(
+                    (ast.unparse(k.value) for k in node.keywords
+                     if k.arg == "type"), None)
+        ok &= check("%s validates every counted flag" % eng, got == want)
+        if got != want:
+            print("        %s" % {k: v for k, v in got.items() if want.get(k) != v})
+    bad = [("pages_arg", "0"), ("pages_arg", "-2"), ("concurrency_arg", "0"),
+           ("block_retries_arg", "-1"), ("delay_arg", "-5"),
+           ("retry_delay_arg", "-1"), ("retry_delay_arg", "nan"),
+           ("pages_arg", "x")]
+    for fn, value in bad:
+        try:
+            getattr(page_flow, fn)(value)
+            rejected, msg = False, ""
+        except _ap.ArgumentTypeError as e:
+            rejected, msg = True, str(e)
+        flag = "--" + fn[:-4].replace("_", "-").replace("block-retries",
+                                                         "proxy-block-retries")
+        ok &= check("%s rejects %r, naming the flag" % (flag, value),
+                    rejected and flag in msg)
+    good = [("pages_arg", "1", 1), ("block_retries_arg", "0", 0),
+            ("delay_arg", "0", 0.0), ("retry_delay_arg", "2.5", 2.5),
+            ("concurrency_arg", "1", 1)]
+    for fn, value, out in good:
+        ok &= check("%s accepts %r" % (fn, value),
+                    getattr(page_flow, fn)(value) == out)
+    return ok
+
+
+def test_status_reaches_the_classifier():
+    group("the HTTP status of the navigation reaches the classifier")
+    ok = True
+    good = grid(*[h for _, h, _ in ALL_CARDS])
+    ok &= check("200 with cars is content",
+                page_flow.classify(good, 200, LISTING_URL) == "content")
+    ok &= check("404 is notfound whatever the body says",
+                page_flow.classify(good, 404, LISTING_URL) == "notfound")
+    ok &= check("503 is blocked, not content",
+                page_flow.classify(good, 503, LISTING_URL) == "blocked")
+    ok &= check("a status that is not an int is read as unknown",
+                page_flow.classify(good, object(), LISTING_URL) == "content")
+    # Each browser engine whose driver returns a response passes its status
+    # on every classify call that judges the navigated page.
+    for eng, needle in (("playwright_scraper.py", "_classify"),
+                        ("puppeteer_scraper.py", "classify")):
+        tree = ast.parse(open(os.path.join(REPO_ROOT, eng), encoding="utf-8").read())
+        calls = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.Call)
+                 and getattr(n.func, "attr", getattr(n.func, "id", "")) == needle]
+        with_status = [c for c in calls
+                       if any(isinstance(a, ast.Name) and a.id == "status"
+                              for a in c.args)
+                       or any(k.arg == "status" for k in c.keywords)]
+        ok &= check("%s passes a status to at least two classify calls"
+                    % eng, len(with_status) >= 2)
+    return ok
+
+
 def main() -> int:
     ok = True
     # Checks that could not run because an optional engine library is absent.
@@ -3473,6 +3730,10 @@ def main() -> int:
     ok &= test_sample_output()
     ok &= test_x_debug_header_is_redacted()
     ok &= test_scraper_api_waitfor_is_an_object()
+    ok &= test_credential_scan_reads_what_matters()
+    ok &= test_no_private_citations()
+    ok &= test_numeric_flags_are_validated()
+    ok &= test_status_reaches_the_classifier()
 
     print()
     if _failures:

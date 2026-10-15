@@ -9,7 +9,8 @@
 [![runs without an account](https://img.shields.io/badge/runs%20without%20an%20account-yes-brightgreen)](#do-you-need-anything-paid)
 
 Scrapes **Spinny** used-car listings and car detail pages into JSON or CSV,
-through Playwright, Selenium, pyppeteer, or a remote browser over CDP.
+through Playwright, Selenium, pyppeteer, or the 2Captcha Scraping Browser API
+over CDP.
 
 ```
 python playwright_scraper.py \
@@ -276,7 +277,8 @@ the two on **482 of 482** measured cards, and every run reports that share.
 ### Exit codes
 
 `0` ok · `1` crash · `2` bad usage · `3` blocked · `4` zero cars ·
-`5` remote API error · `6` partial.
+`5` the content was never obtained (a navigation timeout, a dead proxy, a
+refused remote endpoint) · `6` partial.
 
 A run that finds nothing **writes nothing**, so last night's good output is
 never replaced by `[]`. Pass `--allow-empty` if an empty result is the answer
@@ -458,7 +460,11 @@ identically to the untrimmed original before being committed.
 
 `canary.yml` runs one real listing daily and asserts the row floor, the price
 coverage, the two price bases, the uniqueness of `page`+`position`, the
-site's own advertised total and the run status. Unlike every sibling repo's,
+site's own advertised total and the run status (the assertions are in
+`.github/canary_check.py`; they test the parser and never a share of cars the
+site chose to discount or show an EMI for). It is red on anything that did
+not test the site: a block (exit 3), zero rows (exit 4) or content never
+obtained (exit 5). Unlike every sibling repo's,
 it needs **no credential** — dispatched for the first time on 2026-09-11 from
 a bare GitHub runner it returned **82 cars, 82 priced, 79 with a hub,
 advertised 1546, status `complete`**.
