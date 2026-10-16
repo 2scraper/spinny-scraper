@@ -1738,9 +1738,13 @@ def test_canary_separates_access_from_defect():
     # on it, or the canary quietly stops running the day it expires.
     ok &= check("no step is gated on the optional secret",
                 "HAVE_CDP" not in wf)
+    # It is a paid route, so it reaches the run on the weekly (Monday)
+    # schedule and on a manual dispatch only; the daily run reads it empty.
     ok &= check("...and the secret still reaches the run through the "
                 "environment, never argv",
-                "SPINNY_CDP_ENDPOINT: ${{ secrets.SPINNY_CDP_ENDPOINT }}" in wf
+                "SPINNY_CDP_ENDPOINT: ${{ (github.event_name != 'schedule' || "
+                "github.event.schedule == '23 6 * * 1') && "
+                "secrets.SPINNY_CDP_ENDPOINT || '' }}" in wf
                 and "--cdp-endpoint" not in wf.split("run:")[-3])
     return ok
 

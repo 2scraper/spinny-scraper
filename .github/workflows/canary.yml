@@ -36,6 +36,10 @@ name: canary
 on:
   schedule:
     - cron: "23 6 * * *"
+    # Mondays: the same jobs, WITH the paid secrets (proxy, Scraping Browser,
+    # captcha key). On the daily run above those secrets read as empty, so
+    # it takes the free no-secret route and bills nothing.
+    - cron: "23 6 * * 1"
   workflow_dispatch:
 
 jobs:
@@ -74,8 +78,8 @@ jobs:
         # the step from failing the job; it does not touch the shell's errexit.
         continue-on-error: true
         env:
-          SPINNY_CDP_ENDPOINT: ${{ secrets.SPINNY_CDP_ENDPOINT }}
-          TWOCAPTCHA_KEY: ${{ secrets.TWOCAPTCHA_KEY }}
+          SPINNY_CDP_ENDPOINT: ${{ (github.event_name != 'schedule' || github.event.schedule == '23 6 * * 1') && secrets.SPINNY_CDP_ENDPOINT || '' }}
+          TWOCAPTCHA_KEY: ${{ (github.event_name != 'schedule' || github.event.schedule == '23 6 * * 1') && secrets.TWOCAPTCHA_KEY || '' }}
         run: |
           set +e
           python3 playwright_scraper.py \

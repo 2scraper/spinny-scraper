@@ -13,6 +13,12 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ## [Unreleased]
 
+### Changed
+
+- CI only: the canary's optional paid secrets `SPINNY_CDP_ENDPOINT`, `TWOCAPTCHA_KEY` now reach it only on a new weekly
+  run (Mondays 06:23 UTC) and on a manual dispatch. The daily run keeps its
+  schedule and takes the free route without them, so it bills nothing.
+
 ## [0.2.0] — 2026-10-15
 
 > **Behaviour change:** `--retries 0` is now a usage error (exit 2). It used
