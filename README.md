@@ -458,7 +458,7 @@ engine absent" reads exactly like a passing run.
 Fixtures are real captures, trimmed to whole cards and verified to parse
 identically to the untrimmed original before being committed.
 
-`canary.yml` runs one real listing daily and asserts the row floor, the price
+`canary.yml` runs one real listing weekly (Mondays) and asserts the row floor, the price
 coverage, the two price bases, the uniqueness of `page`+`position`, the
 site's own advertised total and the run status (the assertions are in
 `.github/canary_check.py`; they test the parser and never a share of cars the
