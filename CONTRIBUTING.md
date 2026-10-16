@@ -107,7 +107,8 @@ Then the rest of the presentation, in the order that matters:
    hand before the badge is trusted. Unlike its siblings this canary needs
    **no credential** — the site serves a bare GitHub runner, measured — so it
    is scheduled daily as well. The optional `SPINNY_CDP_ENDPOINT` secret,
-   when set, routes the same run through the Scraping Browser API; no step is
+   when set, routes the weekly (Monday) run and a manual dispatch through the
+   Scraping Browser API (the daily run never uses it, so it bills nothing); no step is
    gated on it, so the canary keeps working the day it expires.
 2. The repo description, homepage and topics set: a description naming what the site
    publishes and the 2Captcha Scraping Browser API, the 2captcha.com
