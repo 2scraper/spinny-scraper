@@ -1,4 +1,4 @@
-# spinny-scraper
+# Spinny Scraper — Used-Car Listings and Prices in Python
 
 [![release](https://img.shields.io/github/v/release/2scraper/spinny-scraper?sort=semver)](https://github.com/2scraper/spinny-scraper/releases)
 [![tests](https://github.com/2scraper/spinny-scraper/actions/workflows/tests.yml/badge.svg)](https://github.com/2scraper/spinny-scraper/actions/workflows/tests.yml)
@@ -7,6 +7,8 @@
 [![licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 [![engines](https://img.shields.io/badge/engines-playwright%20%7C%20selenium%20%7C%20puppeteer-lightgrey)](#which-engine)
 [![runs without an account](https://img.shields.io/badge/runs%20without%20an%20account-yes-brightgreen)](#do-you-need-anything-paid)
+
+**Spinny scraper** — an open-source (MIT) Python tool that reads spinny.com used-car listings and car detail pages and writes the displayed and all-in price, model, year, km driven, fuel type, owners and city to JSON or CSV. Measured 2026-09-11, an ordinary local Chromium on a plain home connection, with no API key and no proxy, returned 62 cars from `/used-cars-in-delhi-ncr/s/` with `--pages 3`, every one of them priced. Use it for used-car price monitoring by city, or compare two runs with `diff_runs.py`.
 
 Scrapes **Spinny** used-car listings and car detail pages into JSON or CSV,
 through Playwright, Selenium, pyppeteer, or the 2Captcha Scraping Browser API
@@ -485,6 +487,23 @@ advertised 1546, status `complete`**.
   This exists for price monitoring and market research at a human scale.
 
 ---
+
+## Guides
+
+- [How to run the 2scraper scrapers: setup, proxies, exit codes and access modes](https://2captcha.com/h/how-to-run-2scraper-open-source-scrapers) — installation, `.env`, `.meta.json` for the whole family.
+
+## Related scrapers
+
+Same CLI conventions, same output contract (one row per item, JSON or CSV, a `.meta.json` sidecar and shared exit codes):
+
+- [Vrbo scraper](https://github.com/2scraper/vrbo-scraper) — Vacation rental prices, ratings and property details…
+- [Webmotors scraper](https://github.com/2scraper/webmotors-scraper) — Car and motorcycle listings from Brazil's webmotors.com.br…
+- [Zimmo scraper](https://github.com/2scraper/zimmo-scraper) — Zimmo.be sale and rent listings
+- [Autotrader scraper](https://github.com/2scraper/autotrader-scraper) — US car listings with VIN, fee-inclusive price, KBB fair…
+- [Avito scraper](https://github.com/2scraper/avito-scraper) — Category and search listings, item pages and seller profiles…
+- [Craigslist scraper](https://github.com/2scraper/craigslist-scraper) — Result lists and adverts from all 714 areas
+
+All scrapers: [github.com/2scraper](https://github.com/2scraper) · Need another site? [Open a request](https://github.com/2scraper/.github/issues/new?title=%5BScraper%20request%5D%20)
 
 ## Licence and scope
 
