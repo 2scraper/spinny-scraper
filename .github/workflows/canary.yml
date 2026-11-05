@@ -35,7 +35,7 @@ name: canary
 # `profile_locked` (exit 5), which says nothing about the site or the code.
 on:
   schedule:
-    - cron: "23 6 * * 1"
+    - cron: "27 7 * * 1"
   workflow_dispatch:
 
 jobs:
