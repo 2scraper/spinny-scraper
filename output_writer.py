@@ -84,6 +84,8 @@ from dataclasses import dataclass, asdict, field, fields
 from datetime import datetime, timezone
 from typing import Optional, List, Set, Sequence, Any, Type
 
+from env_config import redact
+
 
 # The hostname a row came from. Spinny is ONE storefront on one hostname,
 # serving one country in one currency — there is no locale path, no
@@ -575,8 +577,9 @@ def run_meta(status: str, stop_reason: str, pages_requested: int,
         "pages_completed": pages_completed,
         "pages_failed": pages_failed or [],
         "products": products,
-        "start_url": start_url,
-        "final_url": final_url,
+        # Secret-looking query values (?token=...) masked, as in the log.
+        "start_url": redact(start_url),
+        "final_url": redact(final_url),
         "finished_at": datetime.now(timezone.utc).isoformat(),
     }
     if extra:
@@ -648,8 +651,39 @@ def save(rows: Sequence[Any], out_prefix: str, fmt: str,
 #
 # "single_page_mode" is complete by construction: --mode detail reads one
 # page because one page is all there is.
+#
+# "no_results" is a page the site served with nothing on it — a filter that
+# matches no car, a cityless URL, the /used-cars/ landing page. Nothing to
+# scroll, and a complete answer: exit 4.
 COMPLETE_STOP_REASONS = ("completed", "pagination_exhausted", "no_new_products",
-                         "single_page_mode")
+                         "single_page_mode", "no_results")
+
+
+def number_rows(rows: Sequence[Any], mode: str) -> None:
+    """Give a listing run's merged rows their final `position` and `page`.
+
+    After the dedupe, not before. The grid repeats cars (a recommendation
+    strip carries cars the grid already holds), so numbering by grid slot
+    left holes once the repeats were dropped — Mumbai, --pages 10: 184 rows,
+    highest position 202 — and nothing in the file said whether a hole was a
+    repeat or a lost car. Numbered 1..N here, the count of what was dropped
+    goes in the sidecar as `duplicates_dropped`.
+
+    `page` is the batch of 20 a row falls in: the unit of --pages and of
+    `pages_completed`. It used to be the scroll ROUND a card arrived in, and
+    one round can deliver several batches, so a run reporting
+    pages_completed=5 had only pages 1 and 2 in the column.
+    """
+    if mode != "listing":
+        return
+    for i, row in enumerate(rows, start=1):
+        row.position = i
+        row.page = -(-i // CARDS_PER_BATCH)
+
+
+# A Spinny listing loads in batches of this size (page_flow.CARDS_PER_PAGE,
+# repeated here so the writer does not import the browser-side module).
+CARDS_PER_BATCH = 20
 
 
 def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
@@ -658,7 +692,8 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
                start_url: str, final_url: str,
                pages_failed: Optional[List[int]] = None,
                mode: str = "listing", source: str = SOURCE_DEFAULT,
-               extra: Optional[dict] = None) -> int:
+               extra: Optional[dict] = None,
+               duplicates_dropped: int = 0) -> int:
     """Write output + the run-metadata sidecar; return the exit code.
 
     Shared by all three browser engines so the status/exit-code mapping
@@ -685,10 +720,24 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
     # names has a hole for every name nobody added to it.
     complete = stop_reason in COMPLETE_STOP_REASONS and not pages_failed
     row_cls = ROW_CLASS_BY_MODE.get(mode, Product)
-    stats: dict = {}
-    rc = save(rows, out_prefix, fmt, allow_empty=allow_empty, row_cls=row_cls,
-              stats=stats)
-    wrote_output = bool(rows) or allow_empty
+    number_rows(rows, mode)
+    stats: dict = {"duplicates_dropped": duplicates_dropped}
+    # --allow-empty is for an ANSWER of nothing — the run finished and the
+    # listing is empty (exit 4). A run that was blocked or never got its
+    # page (exit 3/5) has said nothing about the listing, so it leaves the
+    # previous output and its sidecar alone even with the flag: with a dead
+    # proxy and --allow-empty a good 62-row file was replaced by `[]` and a
+    # `status: failed` sidecar.
+    empty_is_answer = allow_empty and complete and not blocked
+    if not rows and allow_empty and not empty_is_answer:
+        print(f"[!] --allow-empty applies to a finished run that found "
+              f"nothing; this one did not finish ({stop_reason}), so "
+              f"{out_prefix}.json/.csv and its sidecar are left as they were.")
+        rc = EXIT_NO_PRODUCTS
+    else:
+        rc = save(rows, out_prefix, fmt, allow_empty=empty_is_answer,
+                  row_cls=row_cls, stats=stats)
+    wrote_output = bool(rows) or empty_is_answer
 
     if wrote_output:
         status = "complete" if (rows and complete) else (

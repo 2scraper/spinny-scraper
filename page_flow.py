@@ -75,7 +75,8 @@ Every value here is measured and the measurements are dated.
 """
 
 import logging
-from typing import Callable, Dict, List, Optional
+import os
+from typing import Callable, Dict, List, Optional, Tuple
 
 from product_parser import (detect_page_state, listing_kind, page_url,
                             paginates_by_url, requested_page_in_url,
@@ -636,8 +637,13 @@ def completeness(rows_collected: int, html: Optional[str],
     return out
 
 
+# A settled scroll this many cars or fewer below the advertised total is the
+# end of the listing, not a stall. One batch: a stall loses whole batches.
+STALL_SHORTFALL = CARDS_PER_PAGE
+
+
 def listing_stop_reason(scroll: Optional[dict], completeness: Optional[dict],
-                        rows_collected: int) -> str:
+                        rows_collected: int, state: Optional[str] = None) -> str:
     """Why a listing run stopped, as the sidecar's `stop_reason`.
 
     In one place for all three engines, because the value decides whether the
@@ -662,16 +668,39 @@ def listing_stop_reason(scroll: Optional[dict], completeness: Optional[dict],
     Where the site advertises no total the old reading stands: there is
     nothing better to judge against, and calling every settled scroll partial
     would make the status meaningless.
+
+    "Far below" is a shortfall of MORE than one batch (`STALL_SHORTFALL`). A
+    stall loses whole batches — the stalled run above held 22 of 1546 — while
+    a listing scrolled to its real end can still come up a few cars short of
+    its heading: Kolkata, 2026-11-25 report, settled twice at 414 of an
+    advertised 421. The comparison used to be a strict `<`, so that run was
+    `partial`, exit 6, although nothing more could be scrolled into view.
+    `short_by` in the sidecar still records the gap.
+
+    `state` is the page's classification. An `empty` page — a zero-result
+    filter, a cityless URL, the /used-cars/ landing page — is never scrolled,
+    so `scroll` is None; without the state that fell through to
+    `scroll_budget_exhausted` and exit 5, where the README and the engines'
+    own warning promise exit 4.
     """
     scroll = scroll or {}
     advertised = (completeness or {}).get("total_available")
+    if state == "empty" and not rows_collected:
+        return "no_results"
     if scroll.get("reached_target"):
         # The run got the batches it was asked for. There is very probably
         # more listing left — that is what `short_by` in the sidecar is for —
         # but the request was satisfied, so this is complete.
         return "completed"
     if scroll.get("settled"):
-        if advertised is not None and rows_collected < advertised:
+        # Judged on what the grid RENDERED, not on the rows left after the
+        # dedupe: the grid repeats cars (a recommendation strip), so a
+        # Kolkata listing scrolled to its end on 2026-11-25 showed 405 cards
+        # of an advertised 406 but only 385 distinct cars — 21 "short",
+        # which is no stall.
+        seen = max(rows_collected, scroll.get("cards") or 0)
+        if (advertised is not None
+                and advertised - seen > STALL_SHORTFALL):
             return "scroll_stalled"
         # The grid stopped growing and the site's own count agrees there was
         # no more to get. That is a DATA-based terminating condition
@@ -802,6 +831,75 @@ def numeric_type(flag, cast, minimum, unit):
 # non-negative" (a traceback where a retry was due), and `--pages 0`,
 # `--concurrency 0` or a negative block-retry count ran with a meaning nobody
 # wrote down. Rejected up front, before any browser starts.
+def cdp_refusal_hint(text: str) -> str:
+    """What a refused --cdp-endpoint connection most likely means, read off
+    the refusal's own body.
+
+    Every HTTP 500 used to be explained as "another run still holds this
+    pid". The Scraping Browser answers 500 for other reasons too: on
+    2026-11-25 the body was `proxy_error` (the session's proxy traffic had
+    run out) and the hint still blamed the pid.
+    """
+    low = (text or "").lower()
+    if "profile_locked" in low:
+        return ("`profile_locked`: a Scraping Browser profile allows ONE live "
+                "connection, and another run still holds this `pid`. Wait for "
+                "it to finish, or use a different pid.")
+    if "proxy_error" in low:
+        return ("`proxy_error`: the Scraping Browser could not use its own "
+                "proxy — most often the account's proxy traffic is used up, "
+                "otherwise a fault on the service's side. Check the balance "
+                "and traffic before retrying; this is not the pid and not "
+                "Spinny.")
+    if " 401" in low or "unauthorized" in low or "403" in low:
+        return ("the endpoint rejected the login: check the login, password "
+                "and zone in the --cdp-endpoint URL.")
+    if ("econnrefused" in low or "connection refused" in low
+            or "connect call failed" in low or "errno 111" in low):
+        return "nothing is listening at that host and port."
+    return ("the endpoint refused the connection; the response above says "
+            "why. A `profile_locked` body would mean another run holds this "
+            "`pid`.")
+
+
+def _dir_problem(flag: str, path: Optional[str]) -> Optional[str]:
+    """Why files cannot be written beside `path`, or None."""
+    if not path:
+        return None
+    directory = os.path.dirname(os.path.abspath(path))
+    if not os.path.isdir(directory):
+        return (f"{flag} {path!r}: the directory {directory!r} does not exist. "
+                f"Create it first — it is checked before the browser starts, "
+                f"so a long scroll is not thrown away at the final write.")
+    if not os.access(directory, os.W_OK | os.X_OK):
+        return f"{flag} {path!r}: the directory {directory!r} is not writable."
+    return None
+
+
+def check_args(args) -> Tuple[Optional[str], List[str]]:
+    """Usage checks every engine runs once the flags are final.
+
+    Returns (error, warnings). An error is exit 2 BEFORE any browser starts:
+    `--out nosuchdir/d` used to scroll the whole listing and then lose it to
+    a FileNotFoundError traceback at the write.
+    """
+    error = (_dir_problem("--out", getattr(args, "out", None))
+             or _dir_problem("--dump-html", getattr(args, "dump_html", None)))
+    warnings: List[str] = []
+    if (getattr(args, "proxy_rotate", None) == "per-page"
+            and getattr(args, "proxy_file", None)):
+        # A run here fetches ONE page — a listing is one scrolled URL, a
+        # detail run one car — so there is no second page to move to.
+        warnings.append(
+            "--proxy-rotate per-page behaves like per-run on Spinny: a run "
+            "fetches one page (a listing is one URL that grows by scrolling), "
+            "so the whole run uses one exit. The pool is still used to move "
+            "to another exit when the page fails to load or comes back "
+            "unusable. To spread volume, run several filter URLs, each its "
+            "own run.")
+    return error, warnings
+
+
 pages_arg = numeric_type("--pages", int, 1, "a whole number")
 concurrency_arg = numeric_type("--concurrency", int, 1, "a whole number")
 block_retries_arg = numeric_type("--proxy-block-retries", int, 0, "a whole number")

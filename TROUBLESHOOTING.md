@@ -226,8 +226,10 @@ In order of likelihood:
 
 1. **A dead or unauthenticated proxy exit.** Look at the byte count in the
    log: a Chromium error page is ~180 KB of the browser's own markup.
-2. **A `--cdp-endpoint` profile another run still holds** — that is exit 5,
-   not 3, and says `profile_locked`.
+2. **A refused `--cdp-endpoint`** — that is exit 5, not 3, and the message
+   says why from the endpoint's own answer: `profile_locked` (another run
+   still holds this `pid`) or `proxy_error` (the session's proxy, most often
+   used-up traffic — not the pid and not Spinny).
 3. **The site really has started scoring addresses.** That would be new, and
    the debug dump is what proves it. Try another exit.
 
@@ -315,10 +317,13 @@ credentialed endpoint.
 
 ## `scraper_api_client.py` returns 0 cars
 
-**By construction, and it is not broken.** Measured 2026-09-11: HTTP 200,
-1,873,849 bytes, 0 cars, $0.0005, exit 4. The first response is a shell and the
-grid arrives by XHR after load, so a single browserless fetch cannot see a
-listing here whatever it is routed through. Use a browser engine.
+**By construction, and it is not broken.** The first response is a shell and
+the grid arrives by XHR after load, so a single browserless fetch cannot see a
+listing here whatever it is routed through. Use a browser engine. What comes
+back varies: a 1,873,849-byte shell on 2026-09-11 ($0.0005); HTTP 200 with an
+empty body (exit 3), or HTTP 408 with `--wait-state load` (exit 5), in a
+manual test on 2026-11-25. A shell with no cars is exit 5 — the listing was
+not obtained — not exit 4.
 
 ---
 

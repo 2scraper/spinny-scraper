@@ -144,6 +144,8 @@ class CaptchaChallenge:
     # Raw `size` from the reCAPTCHA client config, when available:
     # "invisible" for v2-invisible and for v3, absent for a v2 checkbox.
     size: Optional[str] = None
+    # True when the live page's client is grecaptcha.enterprise.
+    enterprise: bool = False
 
     @property
     def is_v3(self) -> bool:
@@ -406,7 +408,33 @@ def detect_recaptcha_in_page(evaluate, page_url: str = "") -> Optional[CaptchaCh
         page_url=page_url,
         source="runtime",
         size=size,
+        enterprise=bool(info.get("enterprise")),
     )
+
+
+def unsupported_solve(challenge: Optional[CaptchaChallenge],
+                      site_config: Optional[dict] = None) -> Optional[str]:
+    """Why no solve should be BOUGHT for this challenge, or None.
+
+    Checked by all three engines before any spend. A reCAPTCHA Enterprise
+    widget — which is what Spinny loads on every page — is one this project
+    does not implement a solve for, so buying a standard task for it pays for
+    a token built for a different widget. Selenium did exactly that with
+    `--solve-captcha always` (task bought, injected, lost on reload) while
+    Playwright and pyppeteer did not, only because their runtime detector
+    happened not to fire.
+    """
+    if challenge is None:
+        return None
+    enterprise = challenge.enterprise or (
+        (site_config or {}).get("enterprise") == "true")
+    if enterprise:
+        return ("This page loads reCAPTCHA ENTERPRISE. This project does not "
+                "implement the Enterprise solve, so nothing is bought: a "
+                "standard task would pay for a token made for a different "
+                "widget. On Spinny the widget is an invisible v3 score with "
+                "nothing rendered to solve.")
+    return None
 
 
 def reconcile_detections(html_challenge: Optional[CaptchaChallenge],

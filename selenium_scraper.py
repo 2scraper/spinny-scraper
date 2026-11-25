@@ -29,7 +29,7 @@ Neither is a bug in this code and neither can be fixed from here:
     than connected to and silently failing.
   * **Selenium cannot authenticate a proxy at all.** `--proxy-server=` accepts
     no credentials, and there is no equivalent of pyppeteer's
-    `page.authenticate`. Credentials are stripped and a warning says so, so
+    CDP proxy login. Credentials are stripped and a warning says so, so
     nobody believes a `user:pass` URL is doing something.
 
 There is no --concurrency in ANY engine here, and that is a property of the
@@ -62,7 +62,7 @@ from selenium.webdriver.common.by import By
 
 from captcha_solver import (detect_recaptcha_v3, detect_recaptcha_in_page,
                             reconcile_detections, solve_recaptcha,
-                            INJECT_TOKEN_JS)
+                            unsupported_solve, INJECT_TOKEN_JS)
 from product_parser import (parse_products, parse_detail_page,
                             car_metadata, detect_bot_challenge,
                             listing_kind, site_host, is_supported_host,
@@ -245,7 +245,7 @@ class _Session:
                     "This proxy has credentials and SELENIUM CANNOT SEND "
                     "THEM: --proxy-server accepts an address only, and there "
                     "is no Selenium equivalent of pyppeteer's "
-                    "page.authenticate. They have been stripped, so requests "
+                    "CDP proxy login. They have been stripped, so requests "
                     "will go out unauthenticated and the exit will most "
                     "likely refuse them. Use playwright_scraper.py or "
                     "puppeteer_scraper.py for an authenticated proxy.")
@@ -375,17 +375,16 @@ def _driver(session):
             "scroll_to_bottom": scroll_to_bottom}
 
 
-def _parse_for_mode(html: str, url: str, args, page_num: int = 1,
-                    boundaries: Optional[List[int]] = None) -> List:
-    # `boundaries` is how a run that scrolled ONE long page still reports a
-    # meaningful `page` per row: the card count after each scroll round, so a
-    # car at position 47 is known to have arrived in batch 3. Without it
-    # every row is page 1 and `page`+`position` stops identifying a row.
-    # Mirrors playwright_scraper._parse_for_mode exactly.
+def _parse_for_mode(html: str, url: str, args, page_num: int = 1) -> List:
+    """Rows for this mode, always as a list even when the mode yields one.
+
+    `page` and `position` are final only after the merge: output_writer.
+    finish_run numbers the deduplicated rows 1..N and sets `page` to the
+    batch of 20 each falls in, the same unit as --pages.
+    """
     if args.mode == "detail":
         return parse_detail_page(html, url, category=args.category)
-    return parse_products(html, url, page=page_num, category=args.category,
-                          page_boundaries=boundaries)
+    return parse_products(html, url, page=page_num, category=args.category)
 
 
 def _same_url(a: str, b: str) -> bool:
@@ -491,6 +490,11 @@ def handle_captcha_if_present(session, args, budget=None) -> bool:
                     configured["version"],
                     " enterprise" if configured["enterprise"] == "true" else "",
                     configured["sitekey"] or "(explicit)")
+    why_not = unsupported_solve(challenge, configured)
+    if why_not:
+        logger.info("%s detected via %s — %s", challenge.kind,
+                    challenge.source, why_not)
+        return False
     logger.warning("%s detected via %s (sitekey=%s) — attempting to solve.",
                    challenge.kind, challenge.source, challenge.sitekey)
     if not args.twocaptcha_key:
@@ -519,6 +523,20 @@ def handle_captcha_if_present(session, args, budget=None) -> bool:
     time.sleep(1.5)
     driver.refresh()
     return True
+
+
+def _navigation_status(driver) -> Optional[int]:
+    """The HTTP status of the current document, from Navigation Timing.
+
+    `responseStatus` (Chrome 109+) is the one place Selenium exposes it;
+    None when the browser does not report one."""
+    try:
+        status = driver.execute_script(
+            "const e = performance.getEntriesByType('navigation')[0];"
+            "return e ? e.responseStatus : null;")
+    except WebDriverException:
+        return None
+    return status if isinstance(status, int) and status > 0 else None
 
 
 def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome:
@@ -555,6 +573,19 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         for attempt in range(1, args.retries + 1):
             try:
                 session.driver.get(url)
+                # A proxy that refuses the login does not make driver.get()
+                # raise: Chrome shows an empty 39-byte document, which the
+                # classifier then called "not built by Spinny" — exit 3,
+                # blaming the site. The navigation's own status says 407.
+                if _navigation_status(session.driver) == 407:
+                    exit_failed = "HTTP 407 from the proxy (login refused)"
+                    load_failed = True
+                    logger.error("The proxy answered 407 Proxy Authentication "
+                                 "Required — the page was never fetched. "
+                                 "Selenium cannot send proxy credentials; use "
+                                 "an IP-allowlisted exit, or the Playwright "
+                                 "or pyppeteer engine.")
+                    break
                 load_failed = False
                 break
             except (TimeoutException, WebDriverException) as e:
@@ -771,8 +802,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         html = d["content"]() or html
 
     if args.dump_html:
-        dump_path = (args.dump_html if args.pages == 1
-                     else f"{args.dump_html}.page{page_num}")
+        # Always the path given: a run fetches ONE page whatever --pages
+        # says (a listing grows by scrolling), so a `.page1` suffix only hid
+        # the file from the name that was asked for.
+        dump_path = args.dump_html
         with open(dump_path, "w", encoding="utf-8") as f:
             f.write(html)
         logger.info("Saved the snapshot the parser sees to %s (%d bytes).",
@@ -802,11 +835,6 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         return outcome
 
     final_url = d["current_url"]() or url
-    # The scroll's record of the card count after each round is what lets a
-    # run that scrolled ONE long page still report a meaningful `page` per
-    # row. Without it every row is page 1 and `page`+`position` stops
-    # identifying a row.
-    boundaries = (outcome.scroll or {}).get("boundaries")
     # Through the POLICY rather than unconditionally. `STATE_POLICY` is the
     # one place that says which states are worth reading, and until now
     # nothing consulted its `parse` column: the engines parsed whatever
@@ -823,8 +851,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # Measured across the family on 2026-09-23 by counting definitions
     # against readers: 7 of 24 repos defined `should_parse` and none of
     # them called it.
-    products = (_parse_for_mode(html, final_url, args, page_num,
-                                boundaries=boundaries)
+    products = (_parse_for_mode(html, final_url, args, page_num)
                 if page_flow.should_parse(state) else [])
     logger.info("Parsed %d row(s) from page %d.", len(products), page_num)
 
@@ -948,7 +975,7 @@ def scrape(args) -> int:
         # The tripwire for the assumption this whole engine rests on. False
         # for every URL on this site today; if a deploy ever makes it True,
         # this says so loudly and names what to bring back.
-        if page_flow.pagination_is_addressable(
+        if outcome.ok and page_flow.pagination_is_addressable(
                 outcome.final_url or args.url,
                 _advertised_next_hrefs(session)):
             logger.warning(
@@ -962,11 +989,13 @@ def scrape(args) -> int:
 
     all_rows = []
     merged_seen = set()
+    dropped = 0
     for oc in sorted(outcomes, key=lambda o: o.page_num):
         fresh = dedupe_by_key(oc.products, merged_seen, key=dedupe_key)
         if len(fresh) < len(oc.products):
             logger.info("Dropped %d duplicate row(s) by %s.",
                         len(oc.products) - len(fresh), dedupe_key)
+        dropped += len(oc.products) - len(fresh)
         all_rows.extend(fresh)
 
     # THE RUN STATUS, decided after the merge because one of its cases needs
@@ -979,7 +1008,8 @@ def scrape(args) -> int:
         stop_reason = "single_page_mode"
     else:
         stop_reason = page_flow.listing_stop_reason(
-            outcome.scroll, outcome.completeness, len(all_rows))
+            outcome.scroll, outcome.completeness, len(all_rows),
+            state=outcome.state)
 
     ok_pages = [o for o in outcomes if o.ok]
     failed_pages = [o.page_num for o in outcomes if not o.ok]
@@ -1025,7 +1055,7 @@ def scrape(args) -> int:
                       pages_failed=failed_pages, mode=args.mode,
                       source=site_host(final_url),
                       start_url=args.url, final_url=final_url,
-                      extra=extra)
+                      extra=extra, duplicates_dropped=dropped)
 
 
 def parse_args():
@@ -1084,7 +1114,10 @@ def parse_args():
     p.add_argument("--proxy-block-retries", type=page_flow.block_retries_arg, default=2)
     p.add_argument("--twocaptcha-key", default=None, help="2captcha.com API key")
     p.add_argument("--allow-empty", action="store_true",
-                   help="Write output files even when 0 rows were found.")
+                   help="Write the (empty) output files when a FINISHED run found 0 "
+                        "rows — a filter nothing matches (exit 4). A blocked run or one "
+                        "that never got its page (exit 3/5) leaves earlier output "
+                        "untouched with or without this flag.")
     p.add_argument("--fingerprint", action="store_true",
                    help="Fetch a fingerprint from 2captcha's Fingerprint API "
                         "and apply it over CDP. Needs --twocaptcha-key. "
@@ -1116,7 +1149,12 @@ def parse_args():
                         "every page it serves — it SCORES the session rather "
                         "than challenging it — and no rendered challenge has "
                         "ever been observed.")
-    p.add_argument("--min-score", type=float, default=0.7)
+    p.add_argument("--min-score", type=float, choices=(0.3, 0.7, 0.9),
+                   default=0.7,
+                   help="reCAPTCHA v3 minimum score to request: 0.3, 0.7 or "
+                        "0.9, the three the API accepts. Has no effect on "
+                        "Spinny, where no solve is bought (its widget is "
+                        "reCAPTCHA Enterprise).")
     p.add_argument("--cdp-endpoint", default=None,
                    help="Attach to a running browser at host:port. Must NOT "
                         "carry credentials — chromedriver's debuggerAddress "
@@ -1146,7 +1184,7 @@ def parse_args():
         if why:
             # Named WITH THE REASON: "is not a Spinny site" would be false
             # for api.spinny.com and sends the reader hunting for a typo.
-            p.error(f"{site_host(args.url)} {why}.")
+            p.error(f"{site_host(args.url) or args.url!r} {why}.")
         p.error(f"{site_host(args.url) or args.url!r} is not Spinny. This "
                 f"scraper reads www.spinny.com, the site's only "
                 f"storefront — one country, one language, one currency, no "
@@ -1197,6 +1235,11 @@ def parse_args():
     page_warning = page_flow.page_param_warning(args.url)
     if page_warning:
         logger.warning("%s", page_warning)
+    usage_error, usage_warnings = page_flow.check_args(args)
+    if usage_error:
+        p.error(usage_error)
+    for warning in usage_warnings:
+        logger.warning("%s", warning)
     return args
 
 

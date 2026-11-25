@@ -27,8 +27,9 @@ from __future__ import annotations
 
 import logging
 import random
-from typing import List, Optional
-from urllib.parse import urlparse
+import re
+from typing import List, NamedTuple, Optional
+from urllib.parse import unquote, urlsplit
 
 logger = logging.getLogger("proxy_pool")
 
@@ -50,6 +51,62 @@ class ProxyError(ValueError):
     """A proxy list that cannot be used as given."""
 
 
+class _Proxy(NamedTuple):
+    scheme: str
+    username: Optional[str]          # percent-DECODED
+    password: Optional[str]          # percent-DECODED
+    hostname: Optional[str]
+    hostport: str                    # the raw host[:port], for the port check
+
+
+_SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*)://(.*)$", re.S)
+
+
+def _split(url: str) -> _Proxy:
+    """Take a proxy URL apart, splitting the credentials off at the LAST `@`.
+
+    Not urlparse: it ends the authority at the first `#`, `?` or `/`, so a
+    password containing `#` (common in generated passwords, and legal here
+    because nobody percent-encodes a proxy password) made `mask()` print
+    `http://alice:?` — the login, in a log — and handed Chromium a wrong
+    host. The username and password are percent-decoded, so `us%40er` reaches
+    the proxy as `us@er`: that is the only way to write a login holding `@`
+    or `:` in a URL, and it used to arrive verbatim.
+    """
+    m = _SCHEME_RE.match((url or "").strip())
+    if not m:
+        return _Proxy("", None, None, None, "")
+    scheme, rest = m.group(1).lower(), m.group(2)
+    userinfo = None
+    at = rest.rfind("@")
+    if at >= 0:
+        userinfo, rest = rest[:at], rest[at + 1:]
+    hostport = re.split(r"[/?#]", rest, maxsplit=1)[0]
+    try:
+        hostname = urlsplit("//" + hostport).hostname
+    except ValueError:
+        hostname = None
+    username = password = None
+    if userinfo is not None:
+        user, sep, pw = userinfo.partition(":")
+        username = unquote(user) or None
+        password = unquote(pw) if sep else None
+    return _Proxy(scheme, username, password, hostname, hostport)
+
+
+def _port(proxy: _Proxy) -> Optional[int]:
+    """The port, or None; raises ValueError on a malformed one."""
+    return urlsplit("//" + proxy.hostport).port
+
+
+def _server(proxy: _Proxy) -> str:
+    host = proxy.hostname or ""
+    if ":" in host:                     # an IPv6 literal goes back in brackets
+        host = f"[{host}]"
+    port = _port(proxy)
+    return f"{proxy.scheme}://{host}{f':{port}' if port else ''}"
+
+
 def parse_proxy_line(line: str, source: str = "<arg>") -> Optional[str]:
     """Validate one proxy URL. Returns it, or None for a blank/comment line.
 
@@ -60,13 +117,20 @@ def parse_proxy_line(line: str, source: str = "<arg>") -> Optional[str]:
     line = line.strip()
     if not line or line.startswith("#"):
         return None
+    # A trailing comment — `http://u:p@host:port  # main exit` — is dropped.
+    # Only after whitespace: a URL has none, while a password may hold `#`.
+    line = re.sub(r"\s+#.*$", "", line)
 
     # Every message below reports mask(line), never the line itself. These
     # strings hold a password, and an error message is a log: a CI run
     # printed a live proxy login and password into its own public log this
     # way, from a traceback nobody expected to carry a credential.
     shown = mask(line)
-    parsed = urlparse(line)
+    if re.search(r"\s", line):
+        raise ProxyError(
+            f"{source}: {shown!r} — a proxy URL holds no spaces. A comment "
+            f"after the URL needs a space before its #.")
+    parsed = _split(line)
     if parsed.scheme not in _SUPPORTED_SCHEMES:
         raise ProxyError(
             f"{source}: {shown!r} — scheme must be one of "
@@ -86,7 +150,7 @@ def parse_proxy_line(line: str, source: str = "<arg>") -> Optional[str]:
     # ("http://host:port:login:password") pasted where a proxy URL belongs.
     # The extra colons become part of the port.
     try:
-        parsed.port
+        _port(parsed)
     except ValueError:
         raise ProxyError(
             f"{source}: {shown!r} — the port is not a number. If you copied "
@@ -104,11 +168,17 @@ def parse_proxy_line(line: str, source: str = "<arg>") -> Optional[str]:
 def load_proxy_file(path: str) -> List[str]:
     """Read a proxy-per-line file. Blank lines and `#` comments are skipped."""
     proxies = []
-    with open(path, "r", encoding="utf-8") as f:
-        for lineno, raw in enumerate(f, 1):
-            entry = parse_proxy_line(raw, source=f"{path}:{lineno}")
-            if entry:
-                proxies.append(entry)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except (OSError, UnicodeDecodeError) as e:
+        # A usage error (exit 2), not a traceback (exit 1).
+        raise ProxyError(f"--proxy-file {path}: cannot read it "
+                         f"({e.strerror or e.__class__.__name__}).") from None
+    for lineno, raw in enumerate(lines, 1):
+        entry = parse_proxy_line(raw, source=f"{path}:{lineno}")
+        if entry:
+            proxies.append(entry)
     if not proxies:
         raise ProxyError(f"{path}: no proxy entries found (only blanks/comments?)")
     return proxies
@@ -143,15 +213,20 @@ def mask(url: Optional[str]) -> str:
     if not url:
         return "(none)"
     try:
-        parsed = urlparse(url)
+        parsed = _split(url)
+        if not parsed.scheme:
+            return "?://?"          # not a URL at all: nothing to show
         host = parsed.hostname or "?"
-        # `parsed.port` raises on a malformed authority; the raw netloc is
-        # not safe to fall back to, because that is where the password is.
+        if ":" in host:
+            host = f"[{host}]"
+        # The port raises on a malformed authority; the raw text is not safe
+        # to fall back to, because that is where the password is.
         try:
-            port = f":{parsed.port}" if parsed.port else ""
+            port = f":{_port(parsed)}" if _port(parsed) else ""
         except ValueError:
             port = ":?"
-        creds = "***:***@" if (parsed.username or parsed.password) else ""
+        creds = ("***:***@" if (parsed.username or parsed.password
+                                or "@" in url) else "")
         scheme = parsed.scheme or "?"
         return f"{scheme}://{creds}{host}{port}"
     except Exception:  # noqa: BLE001 — a masker that raises is worse than a
@@ -170,9 +245,8 @@ def to_playwright(url: Optional[str]) -> Optional[dict]:
     """
     if not url:
         return None
-    parsed = urlparse(url)
-    port = f":{parsed.port}" if parsed.port else ""
-    proxy = {"server": f"{parsed.scheme}://{parsed.hostname}{port}"}
+    parsed = _split(url)
+    proxy = {"server": _server(parsed)}
     if parsed.username:
         proxy["username"] = parsed.username
     if parsed.password:
@@ -187,14 +261,13 @@ def split_credentials(url: Optional[str]):
     `--proxy-server=` switch has nowhere to put a password AND lands in the
     browser process's argv, where anything that can run `ps` reads it — so
     the address goes on the command line and the credentials go through the
-    driver's own channel (pyppeteer's `page.authenticate`). Selenium has no
+    driver's own channel (pyppeteer answers the proxy over CDP `Fetch`). Selenium has no
     such channel at all, which is why it strips these and warns.
     """
     if not url:
         return None, None
-    parsed = urlparse(url)
-    port = f":{parsed.port}" if parsed.port else ""
-    scrubbed = f"{parsed.scheme}://{parsed.hostname}{port}"
+    parsed = _split(url)
+    scrubbed = _server(parsed)
     if parsed.username or parsed.password:
         return scrubbed, (parsed.username or "", parsed.password or "")
     return scrubbed, None

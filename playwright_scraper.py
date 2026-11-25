@@ -108,7 +108,7 @@ from playwright.sync_api import (sync_playwright, Error as PWError,
 
 from captcha_solver import (detect_recaptcha_v3, detect_recaptcha_in_page,
                             reconcile_detections, solve_recaptcha,
-                            INJECT_TOKEN_JS)
+                            unsupported_solve, INJECT_TOKEN_JS)
 from product_parser import (parse_products, parse_detail_page,
                             car_metadata, detect_bot_challenge,
                             listing_kind, site_host, is_supported_host,
@@ -299,8 +299,15 @@ def _advertised_next_hrefs(page, page_num: int = 1) -> List[str]:
     (a sibling repo had exactly that).
     """
     selector = page_flow.next_page_selector(page_num)
-    return [el.get_attribute("href")
-            for el in page.query_selector_all(selector)]
+    try:
+        return [el.get_attribute("href")
+                for el in page.query_selector_all(selector)]
+    except PWError as e:
+        # A tripwire, not the run: a page that is navigating (Chromium's own
+        # error page reloading after a dead proxy) used to raise here and
+        # turn a clean exit 5 into a traceback and exit 1.
+        logger.debug("Could not read pagination links: %s", e)
+        return []
 
 
 def _check_for_new_pagination(page, page_num: int = 1) -> None:
@@ -481,9 +488,7 @@ def _connect_remote(pw, args):
             f"could not connect to --cdp-endpoint "
             f"{_mask_credentials(args.cdp_endpoint)}: "
             f"{_mask_credentials(str(e))}\n"
-            f"A Scraping Browser profile allows ONE live connection at a "
-            f"time, so a 500 here usually means another run still holds this "
-            f"`pid`. Wait for it to finish, or use a different pid."
+            f"{page_flow.cdp_refusal_hint(str(e))}"
         ) from None
     # Reuse the remote browser's existing context so its
     # fingerprint/session/proxy settings stay intact.
@@ -642,6 +647,11 @@ def handle_captcha_if_present(page, args, budget=None) -> bool:
                     configured["version"],
                     " enterprise" if configured["enterprise"] == "true" else "",
                     configured["sitekey"] or "(explicit)")
+    why_not = unsupported_solve(challenge, configured)
+    if why_not:
+        logger.info("%s detected via %s — %s", challenge.kind,
+                    challenge.source, why_not)
+        return False
     logger.warning("%s detected via %s (sitekey=%s, action=%s) — attempting to solve.",
                    challenge.kind, challenge.source, challenge.sitekey, challenge.action)
     if not args.twocaptcha_key:
@@ -672,23 +682,16 @@ def handle_captcha_if_present(page, args, budget=None) -> bool:
     return True
 
 
-def _parse_for_mode(html: str, url: str, args, page_num: int = 1,
-                    boundaries: Optional[List[int]] = None) -> List:
+def _parse_for_mode(html: str, url: str, args, page_num: int = 1) -> List:
     """Rows for this mode, always as a list even when the mode yields one.
 
-    `boundaries` is how a run that scrolled ONE long page still reports a
-    meaningful `page` per row: it is the card count observed after each
-    scroll round, so a card at position 47 is known to have arrived in batch
-    3 without re-parsing a 15 MB document once per round. Without it every
-    row would be labelled page 1 — and `position` restarts nowhere, so 482
-    rows would carry 482 distinct positions and one meaningless page number.
-    A sibling repo shipped exactly that and 60 of 119 rows silently claimed a
-    position another row already had.
+    `page` and `position` are final only after the merge: output_writer.
+    finish_run numbers the deduplicated rows 1..N and sets `page` to the
+    batch of 20 each falls in, the same unit as --pages.
     """
     if args.mode == "detail":
         return parse_detail_page(html, url, category=args.category)
-    return parse_products(html, url, page=page_num, category=args.category,
-                          page_boundaries=boundaries)
+    return parse_products(html, url, page=page_num, category=args.category)
 
 
 def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome:
@@ -1015,8 +1018,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # to tell a parsing bug from a too-early snapshot is to inspect the exact
     # bytes the parser was given.
     if args.dump_html:
-        dump_path = (args.dump_html if args.pages == 1
-                     else f"{args.dump_html}.page{page_num}")
+        # Always the path given: a run fetches ONE page whatever --pages
+        # says (a listing grows by scrolling), so a `.page1` suffix only hid
+        # the file from the name that was asked for.
+        dump_path = args.dump_html
         with open(dump_path, "w", encoding="utf-8") as f:
             f.write(html)
         logger.info("Saved the snapshot the parser sees to %s (%d bytes).",
@@ -1057,15 +1062,6 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                       else f" (re-fetched {block_retries + 1} time(s))"))
         outcome.blocked_by = vendor
         return outcome
-
-    # The scroll's own record of how many cards were in the DOM after each
-    # round is what lets a run that scrolled ONE long page still report a
-    # meaningful `page` per row: a car at position 47 is known to have
-    # arrived in batch 3. Without it every row would be labelled page 1,
-    # `position` would run 1..482, and the two columns together would stop
-    # identifying a row — which a sibling repo shipped, with 60 of 119 rows
-    # claiming a position another row already had.
-    boundaries = (outcome.scroll or {}).get("boundaries")
     # Through the POLICY rather than unconditionally. `STATE_POLICY` is the
     # one place that says which states are worth reading, and until now
     # nothing consulted its `parse` column: the engines parsed whatever
@@ -1082,8 +1078,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # Measured across the family on 2026-09-23 by counting definitions
     # against readers: 7 of 24 repos defined `should_parse` and none of
     # them called it.
-    products = (_parse_for_mode(html, session.page.url, args, page_num,
-                                boundaries=boundaries)
+    products = (_parse_for_mode(html, session.page.url, args, page_num)
                 if page_flow.should_parse(state) else [])
     logger.info("Parsed %d row(s) from page %d.", len(products), page_num)
 
@@ -1275,7 +1270,7 @@ def scrape(args) -> int:
             # deploy ever makes it True, this says so loudly and names what
             # to bring back — which beats discovering it from a run that
             # quietly took one page.
-            if page_flow.pagination_is_addressable(
+            if outcome.ok and page_flow.pagination_is_addressable(
                     outcome.final_url or args.url,
                     _advertised_next_hrefs(session.page)
                     if session.page else None):
@@ -1292,6 +1287,7 @@ def scrape(args) -> int:
     # the fetch: the row order is a property of the merge, not of timing.
     all_rows = []
     merged_seen = set()
+    dropped = 0
     for oc in sorted(outcomes, key=lambda o: o.page_num):
         fresh = dedupe_by_key(oc.products, merged_seen, key=dedupe_key)
         if len(fresh) < len(oc.products):
@@ -1300,6 +1296,7 @@ def scrape(args) -> int:
             # here means the parse is picking up something twice.
             logger.info("Dropped %d duplicate row(s) by %s.",
                         len(oc.products) - len(fresh), dedupe_key)
+        dropped += len(oc.products) - len(fresh)
         all_rows.extend(fresh)
 
     # THE RUN STATUS, decided after the merge because one of its cases needs
@@ -1313,7 +1310,8 @@ def scrape(args) -> int:
         stop_reason = "single_page_mode"
     else:
         stop_reason = page_flow.listing_stop_reason(
-            outcome.scroll, outcome.completeness, len(all_rows))
+            outcome.scroll, outcome.completeness, len(all_rows),
+            state=outcome.state)
 
     ok_pages = [o for o in outcomes if o.ok]
     failed_pages = [o.page_num for o in outcomes if not o.ok]
@@ -1364,7 +1362,7 @@ def scrape(args) -> int:
                       pages_failed=failed_pages, mode=args.mode,
                       source=site_host(final_url),
                       start_url=args.url, final_url=final_url,
-                      extra=extra)
+                      extra=extra, duplicates_dropped=dropped)
 
 
 def parse_args():
@@ -1460,9 +1458,10 @@ def parse_args():
                         "unauthenticated proxy exit rather than a scored one.")
     p.add_argument("--twocaptcha-key", default=None, help="2captcha.com API key")
     p.add_argument("--allow-empty", action="store_true",
-                   help="Write output files even when 0 rows were found. Off by "
-                        "default so a failed run can't overwrite a good result "
-                        "with an empty one; exit code is 4 either way.")
+                   help="Write the (empty) output files when a FINISHED run found 0 "
+                        "rows — a filter nothing matches (exit 4). A blocked run or one "
+                        "that never got its page (exit 3/5) leaves earlier output "
+                        "untouched with or without this flag.")
     p.add_argument("--fingerprint", action="store_true",
                    help="Fetch a browser fingerprint from 2captcha's Fingerprint "
                         "API and apply it to the launched browser. Needs "
@@ -1501,10 +1500,12 @@ def parse_args():
                         "than challenging it — and no rendered challenge has "
                         "ever been observed. The path is wired up because a "
                         "bot manager can be switched on between deploys.")
-    p.add_argument("--min-score", type=float, default=0.7,
-                   help="reCAPTCHA v3 minimum score to request (0.3, 0.7 or 0.9 "
-                        "— the API only accepts these three). Ignored for v2 "
-                        "widgets.")
+    p.add_argument("--min-score", type=float, choices=(0.3, 0.7, 0.9),
+                   default=0.7,
+                   help="reCAPTCHA v3 minimum score to request: 0.3, 0.7 or "
+                        "0.9, the three the API accepts. Has no effect on "
+                        "Spinny, where no solve is bought (its widget is "
+                        "reCAPTCHA Enterprise).")
     p.add_argument("--cdp-endpoint", default=None,
                    help="Connect to an already-running browser over CDP instead "
                         "of launching Playwright's bundled Chromium, e.g. "
@@ -1536,7 +1537,7 @@ def parse_args():
             # Named WITH THE REASON. "is not a Spinny site" would be
             # false for api.spinny.com and sends the reader hunting for a
             # typo that is not there.
-            p.error(f"{site_host(args.url)} {why}.")
+            p.error(f"{site_host(args.url) or args.url!r} {why}.")
         p.error(f"{site_host(args.url) or args.url!r} is not Spinny. This "
                 f"scraper reads www.spinny.com, which is the site's only "
                 f"storefront — one country, one language, one currency, no "
@@ -1600,6 +1601,11 @@ def parse_args():
                        "to read. The run status will say single_page_mode.",
                        args.pages, args.mode)
         args.pages = 1
+    usage_error, usage_warnings = page_flow.check_args(args)
+    if usage_error:
+        p.error(usage_error)
+    for warning in usage_warnings:
+        logger.warning("%s", warning)
     return args
 
 

@@ -73,6 +73,43 @@ _BRACED_PLACEHOLDER_RE = re.compile(r"\{[A-Za-z_][A-Za-z0-9_]*\}")
 
 _loaded_from = None
 
+# Query parameters whose VALUE is a secret wherever they appear in a URL. A
+# SPINNY_URL carrying `?token=...` was printed whole in every "Fetching page"
+# line and stored in the sidecar's start_url/final_url, while proxy and CDP
+# passwords beside it were masked.
+_SECRET_PARAM_RE = re.compile(
+    r"([?&;](?:access_?token|token|api_?key|apikey|key|auth|signature|sig|"
+    r"password|passwd|secret|session)=)[^&#\s'\"]+",
+    re.IGNORECASE)
+
+
+def redact(text):
+    """`text` with secret-looking query parameter values replaced by ***."""
+    if not isinstance(text, str):
+        return text
+    return _SECRET_PARAM_RE.sub(r"\1***", text)
+
+
+class _RedactSecrets(logging.Filter):
+    """Applies `redact` to every log record's final message."""
+
+    def filter(self, record):
+        try:
+            message = record.getMessage()
+        except Exception:                       # noqa: BLE001
+            return True
+        cleaned = redact(message)
+        if cleaned != message:
+            record.msg, record.args = cleaned, None
+        return True
+
+
+def install_log_redaction():
+    """Attach the redaction filter to every root handler, once."""
+    for handler in logging.getLogger().handlers:
+        if not any(isinstance(f, _RedactSecrets) for f in handler.filters):
+            handler.addFilter(_RedactSecrets())
+
 
 def _parse_line(line):
     """Return (key, value) or None. Understands `export K=V`, quotes, # comments."""
@@ -86,12 +123,16 @@ def _parse_line(line):
     key, _, value = line.partition("=")
     key = key.strip()
     value = value.strip()
-    # Strip one matching pair of quotes; leave inner ones alone.
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-        value = value[1:-1]
-    else:
-        # Unquoted values may carry a trailing comment.
-        value = value.split(" #")[0].strip()
+    # A quoted value runs to its CLOSING quote, and anything after that — a
+    # `# comment` — is dropped. Matching only a quote at each END kept the
+    # quotes of `KEY="value" # comment`, so a proxy written that way was
+    # rejected whenever python-dotenv was not installed.
+    if value[:1] in ("\"", "'"):
+        end = value.find(value[0], 1)
+        if end > 0:
+            return (key, value[1:end]) if key else None
+    # Unquoted values may carry a trailing comment, after whitespace.
+    value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
     if not key:
         return None
     return key, value
@@ -194,15 +235,27 @@ def apply(args, keys=None, quiet=False):
     """Fill unset argparse destinations from the environment.
 
     Call once, right after `parse_args()`. Only fills a destination that the
-    parser actually defines and that is still falsy, so an explicit flag always
-    wins.
+    parser actually defines and that was NOT given on the command line, so an
+    explicit flag always wins — including an explicitly EMPTY one:
+    `--cdp-endpoint ""` or `--proxy ""` switches off what .env configures,
+    and is then stored as None. Before, an empty flag was "unset" and the
+    .env value came back, leaving no way to run without it short of editing
+    the file.
     """
+    install_log_redaction()
     load_env()
 
     for env_name, dest in (keys or ENV_KEYS).items():
         if not hasattr(args, dest):
             continue
-        if getattr(args, dest):
+        given = getattr(args, dest)
+        if given is not None:
+            if isinstance(given, str) and not given.strip():
+                setattr(args, dest, None)
+                if not quiet and env_value(env_name):
+                    logger.info("--%s given empty: not using %s from the "
+                                "environment.", dest.replace("_", "-"),
+                                env_name)
             continue
         value = env_value(env_name)
         if value:

@@ -69,13 +69,18 @@ Two consequences:
   addresses.
 * **`pages_completed` in the sidecar counts batches of 20, not URLs**, and it
   can legitimately exceed `pages_requested`: one scroll round sometimes
-  delivers two or three batches.
+  delivers two or three batches. So the row count of a `--pages N` run is
+  not fixed: re-measured 2026-11-25, two Delhi runs a minute apart at
+  `--pages 3` held 75 and 60 cars, and a manual test the same week saw 60 to
+  100. The run stops after the round that reaches N × 20.
 
 ---
 
 ## What a healthy run looks like
 
-All measured 2026-09-11, local Chromium, no key, no proxy:
+All measured 2026-09-11, local Chromium, no key, no proxy (the row counts
+of a `--pages` run vary between runs — see above; on 2026-11-25 Delhi
+advertised 1705 cars):
 
 | Run | Cars | Priced | All-in ≥ displayed | Site's own total | Status |
 |---|---|---|---|---|---|
@@ -179,16 +184,16 @@ python playwright_scraper.py --mode detail \
 | `--concurrency` | Accepted and **refused** with the reason. See above. |
 | `--proxy` | One proxy URL. Credentials go through the driver, never argv. |
 | `--proxy-file` | One proxy URL per line, to rotate across. |
-| `--proxy-rotate` | `per-run` (default) or `per-page`. |
+| `--proxy-rotate` | `per-run` (default) or `per-page`. A Spinny run fetches ONE page, so `per-page` behaves like `per-run` (the run says so); the pool is still used to move off an exit that fails. |
 | `--proxy-shuffle` | Shuffle the pool at startup. |
 | `--proxy-block-retries` | Retries from OTHER exits when a page comes back unusable (default 2). |
 | `--twocaptcha-key` | 2Captcha key. Prefer `.env`. |
 | `--captcha-api` | `v2` (default) or the legacy `v1`. |
 | `--solve-captcha` | `when-blocked` (default) or `always`. Buys nothing here — see below. |
-| `--min-score` | reCAPTCHA v3 score to request (0.3 / 0.7 / 0.9). |
+| `--min-score` | reCAPTCHA v3 score to request: 0.3, 0.7 or 0.9, nothing else. No effect on Spinny, where no solve is bought. |
 | `--cdp-endpoint` | Drive a remote browser over CDP instead of launching one. |
-| `--allow-empty` | Write files even with 0 rows. Off by default. |
-| `--dump-html` | Save the exact HTML the parser saw — on success too. |
+| `--allow-empty` | Write empty files when a FINISHED run found 0 rows (exit 4). Never after a block or a failed load (exit 3/5). |
+| `--dump-html` | Save the exact HTML the parser saw — on success too — to exactly that path. |
 | `--headless` / `--headful` | Default headless. |
 
 Engine-specific, and the differences are asserted by the offline suite so
@@ -216,7 +221,12 @@ Known limits, stated here rather than left to be discovered:
   `host:port` with nowhere to put a password. A credentialed endpoint is
   refused with exit 2 rather than connected to and silently failing.
 * **Selenium cannot authenticate a proxy at all.** Credentials are stripped
-  and a warning says so.
+  and a warning says so. A proxy that then answers 407 is reported as a
+  failed load (exit 5), not as the site blocking the run.
+* **pyppeteer answers a proxy login over CDP `Fetch`**, because the
+  `page.authenticate()` it ships calls a CDP method current Chromium no
+  longer has. Verified 2026-11-25 against Chromium 154 through a local
+  proxy that requires a login.
 * **pyppeteer is effectively unmaintained**, and its own README points at
   Playwright. On Apple Silicon it downloads an x86_64 Chromium that will not
   open its DevTools socket — pass `--chromium-path` at a Chrome you already
@@ -232,6 +242,12 @@ of its own `["Product","Car"]` JSON-LD and its overview table, which adds
 nine columns a card cannot carry: the **exact** odometer reading, the
 previous-owner count, the registration year and month, the colour, the
 seating capacity, the insurance validity and type, and the availability.
+
+A detail row also carries the strike price, the rupee discount and the
+monthly EMI when the car's own price box prints them; the "Similar cars"
+strip below it belongs to other cars and is never read. `category` is null
+in detail mode (a car page is not a listing to name), and `in_stock` is
+null in listing mode (only a car page states availability).
 
 `sku` is the same id in both modes, so a listing row and a detail row join
 exactly — and they were checked against each other on a real pair. For car
@@ -250,6 +266,11 @@ The first sixteen columns are the family's, byte-identical across every
 scraper in this org: `source`, `scraped_at`, `url`, `sku`, `title`, `brand`,
 `price`, `currency`, `original_price`, `discount_pct`, `rating`,
 `review_count`, `in_stock`, `image_url`, `category`, `price_source`.
+
+`page` is the batch of 20 a row falls in (the unit of `--pages`) and
+`position` runs 1..N over the rows in the file, numbered after repeated
+cars are dropped — the grid repeats some cars, and the sidecar's
+`duplicates_dropped` says how many.
 
 Then Spinny's own: `page`, `position`, `model`, `variant`, `year`,
 `km_driven`, `fuel_type`, `transmission`, `rto`, `hub`, `car_city`,
@@ -283,21 +304,24 @@ the two on **482 of 482** measured cards, and every run reports that share.
 refused remote endpoint) · `6` partial.
 
 A run that finds nothing **writes nothing**, so last night's good output is
-never replaced by `[]`. Pass `--allow-empty` if an empty result is the answer
-you want recorded. An empty CSV still carries its header.
+never replaced by `[]`. Pass `--allow-empty` if an empty listing is the
+answer you want recorded; it applies only to a run that finished (exit 4) —
+a blocked run or one that never got its page (exit 3/5) leaves earlier
+output alone either way. An empty CSV still carries its header.
 
 Every run writes `<out>.meta.json` beside the data: `status`, `stop_reason`,
 `pages_requested`, `pages_completed`, the scroll trace, the listing's own
 heading and the completeness arithmetic. A **failed** run writes no sidecar —
 it would contradict the previous good data still sitting there.
 
-`stop_reason` on a listing run is one of four, and the last two are `partial`:
+`stop_reason` on a listing run is one of five, and the last two are `partial`:
 
 | `stop_reason` | Means |
 |---|---|
 | `completed` | the batches `--pages` asked for were gathered |
-| `no_new_products` | the grid stopped growing **and the site's own count agrees** the listing ran out |
-| `scroll_stalled` | the grid stopped growing while the site still advertises far more — the lazy load stalled, it did not finish |
+| `no_new_products` | the grid stopped growing **and the site's own count agrees** the listing ran out — within one batch of 20, since a listing scrolled to its end can still come up a few cars short of its heading (414 of 421) |
+| `no_results` | the site served the page with nothing on it — a filter nothing matches, a URL with no city, the `/used-cars` landing page (exit 4) |
+| `scroll_stalled` | the grid stopped growing while the site still advertises more than a batch beyond it — the lazy load stalled, it did not finish |
 | `scroll_budget_exhausted` | the round budget ran out with the grid still growing |
 
 ---
@@ -305,23 +329,22 @@ it would contradict the previous good data still sitting there.
 ## Traps that look like bugs
 
 **`hub` is null on ~2% of rows, and that is correct.** 10 of 705 measured
-cards print no hub. Everything read by position in a card's span order breaks
-on those ten; this parser reads by pattern instead, so the other fields
-survive the gap.
+cards print no hub (2 of 62 on 2026-11-25). The hub is read from its own
+slot on the card, so a hub without a comma ("Omaxe Mall Greater Noida") is
+read too; everything else is read by pattern, so the other fields survive
+the gap.
 
 **`original_price` is null on ~8% of rows, and that is correct.** 20 of 705
 cards carry no strike price — and those same 20 carry no discount badge, so
 they are *not discounted* rather than *not parsed*. `discount_pct` is null on
 exactly those rows.
 
-> **Re-measured 2026-10-13, and the figure above no longer holds:** 0 of 186
-> live tiles (the first 62 of Delhi NCR, Mumbai and Bangalore, one run each)
-> carried a strike price, a discount badge or any "OFF"/"Save" text, so
-> `original_price` and `discount_amount` were null on every row and the
-> parser logged its coverage warnings. Either Spinny stopped discounting or
-> it changed how a discount is drawn; a card WITH a discount is what would
-> tell the two apart, and none was in these samples. The 685/705 figure was
-> taken on 2026-09-11 and is kept as history, not as a current rate.
+> **The share of discounted cars is the site's choice and moves.** 685 of
+> 705 on 2026-09-11; 0 of 186 on 2026-10-13; ~92% of a Delhi run on
+> 2026-11-22 (an independent manual test), of which about a third showed
+> "Ends today" instead of a rupee amount, so `discount_amount` is null on
+> those; 0 of 62 on 2026-11-25. The coverage warnings for these two columns
+> fire only when a card PRINTS a strike or a rupee badge that was not read.
 
 **`rating` and `review_count` are null on every row of every run.** Spinny
 publishes no car-level rating anywhere. The five inspection scores a detail
@@ -390,9 +413,11 @@ per `pid`; a second concurrent run on the same profile gets a 500
 (`profile_locked`, exit 5).
 
 **Proxies** buy volume from many addresses. You are unlikely to need one for a
-single run. `--proxy-file` with `--proxy-rotate per-page` relaunches the
-browser on each rotation, because replaying a bot manager's cookies from a
-second address is a stronger signal than either address alone.
+single run. A run fetches one page, so `--proxy-file` rotates only when an
+exit fails (with `--proxy-block-retries`), and `--proxy-rotate per-page`
+behaves like `per-run`; to spread volume, run several filter URLs. Each
+rotation relaunches the browser, because replaying a bot manager's cookies
+from a second address is a stronger signal than either address alone.
 
 Verified 2026-09-11 through 2Captcha's residential gateway on an Indian exit
 (Palghar, Maharashtra): 62 cars, 100% price coverage, identical to the direct
@@ -416,11 +441,15 @@ and with your exit country. Verified 2026-09-11: fingerprint 3088655 (IN)
 applied to a live run.
 
 **The Scraper API** (`scraper_api_client.py`) is a fourth, browserless
-engine — and on this site it returns **nothing**, by construction. Measured
-2026-09-11: HTTP 200, 1,873,849 bytes, **0 cars**, $0.0005, exit 4. The first
-response is a shell; the grid arrives by XHR after load. Use a browser engine
-here. The client ships because it is family core and is genuinely the right
-tool on sites whose grid is server-rendered.
+engine — and on this site it returns **no cars**, by construction: the first
+response is a shell and the grid arrives by XHR after load. What comes back
+varies: on 2026-09-11 a 1,873,849-byte shell ($0.0005); in a manual test on
+2026-11-25, HTTP 200 with an empty body (exit 3) and, with
+`--wait-state load`, HTTP 408 (exit 5). A shell with no cars exits **5**
+(the listing was not obtained), not 4. Use a browser engine here. The client
+ships because it is family core and is genuinely the right tool on sites
+whose grid is server-rendered. It refuses a non-Spinny or non-https URL, a
+car URL and a placeholder key before the paid call.
 
 ---
 
@@ -434,8 +463,18 @@ Reports added, removed and changed cars by `sku`. It **refuses** to compare
 two runs that are not both `complete`, or that were taken in different modes:
 a partial run's un-fetched cars would otherwise read as sold.
 
+**A `--pages` run is a sample, not the catalogue.** `complete` means "got
+the batches asked for", and two such runs of one listing hold different cars
+(Spinny reorders the grid between loads). So unless BOTH runs hold their
+listing's advertised total (within one batch), cars in only one run are
+listed as `only_in_old` / `only_in_new`, not removed/added, and
+`--fail-on-change` ignores them. Price changes on cars both runs hold are
+reported and counted either way. To diff membership, scroll to the end of the
+listing (`--pages` above total ÷ 20), or narrow it with a filter URL.
+
 Tracked: `price`, `original_price`, `discount_pct`, `currency`, `in_stock`,
-`price_all_in`, `discount_amount`. Both price bases, on purpose — a car whose
+`price_all_in`, `discount_amount` (`in_stock` is null on every listing row,
+so it only ever changes between detail runs). Both price bases, on purpose — a car whose
 displayed price is unchanged while its all-in figure rose has had a *fee*
 changed, not a price cut.
 

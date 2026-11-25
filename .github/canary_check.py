@@ -185,8 +185,8 @@ def check(rows, meta):
     keys = [(r.get("page"), r.get("position")) for r in rows]
     if len(set(keys)) != len(keys):
         fail.append(f"{len(keys) - len(set(keys))} row(s) share a (page, "
-                    f"position) pair: the scroll's batch boundaries are not "
-                    f"reaching the parser")
+                    f"position) pair: finish_run's numbering of the merged rows "
+                    f"(output_writer.number_rows) is not being applied")
 
     currencies = {r.get("currency") for r in rows if r.get("currency")}
     if currencies - {"INR"}:
@@ -200,8 +200,8 @@ def check(rows, meta):
                     f"not reaching further into the grid")
     batches_seen = {r.get("page") for r in rows}
     if len(batches_seen) < 2:
-        fail.append(f"every row claims batch {sorted(batches_seen)}: the "
-                    f"scroll's boundaries are not being recorded")
+        fail.append(f"every row claims batch {sorted(batches_seen)}: `page` "
+                    f"should be the batch of 20 each row falls in")
     if meta.get("status") != "complete":
         fail.append(f"run status is {meta.get('status')!r}, not 'complete'")
     if meta.get("mode") != "listing":

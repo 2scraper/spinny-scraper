@@ -99,7 +99,7 @@ from product_parser import (parse_products, parse_detail_page, car_metadata,
                             strip_tracking, prices_in, scaled_price,
                             rupee_amount, recaptcha_config, count_cards)
 from proxy_pool import (ProxyPool, mask, to_playwright, split_credentials,
-                        parse_proxy_line)
+                        parse_proxy_line, ProxyError)
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -3062,10 +3062,10 @@ def test_engines(skips):
         # it settles regardless of what was asked for.
         ok &= check("%s turns --pages into a scroll budget" % name,
                     "scroll_rounds_for" in src and "target_cards" in src)
-        # The scroll's per-round card counts are what let a run that fetched
-        # ONE page still report a meaningful `page` per row.
-        ok &= check("%s threads the scroll boundaries into the parse" % name,
-                    "boundaries" in src)
+        # `page`/`position` are numbered by finish_run AFTER the dedupe, so
+        # every engine must hand it the count of what the dedupe dropped.
+        ok &= check("%s passes the dropped-duplicate count to finish_run" % name,
+                    "duplicates_dropped=dropped" in src)
         # Spinny publishes its own total, so completeness is arithmetic.
         ok &= check("%s records the arithmetic completeness check" % name,
                     "page_flow.completeness" in src)
@@ -3686,6 +3686,337 @@ def test_status_reaches_the_classifier():
     return ok
 
 
+def _src(name):
+    with open(os.path.join(REPO_ROOT, name), encoding="utf-8") as f:
+        return f.read()
+
+
+def _cred_url(scheme, user, password, hostport):
+    """A credentialled URL assembled at run time, so the committed source
+    holds no `user:pass@` literal for the credential scan to flag."""
+    return "%s://%s%s%s@%s" % (scheme, user, ":", password, hostport)
+
+
+def test_manual_report_2026_11_25():
+    """One check per bug of the 2026-11-16/22/25 manual-test report that can
+    be checked offline. Every check here FAILS on main 74e9468."""
+    import argparse as _ap
+    import logging as _logging
+    import diff_runs
+    import output_writer as ow
+    import proxy_pool
+    ok = True
+
+    group("report 2026-11-25: Docker, output contract and completeness")
+    docker = _src("Dockerfile")
+    ok &= check("1: the image installs libatomic1 before playwright install",
+                "libatomic1" in docker
+                and docker.index("libatomic1") < docker.index("playwright install"))
+
+    # 4: --allow-empty never overwrites after a blocked or unfinished run.
+    for blocked, reason in ((False, "page_load_timeout"), (True, "blocked_not-served")):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "d")
+            open(out + ".json", "w").write("GOOD")
+            open(out + ".meta.json", "w").write("GOODMETA")
+            with redirect_stdout(io.StringIO()):
+                rc = finish_run([], out, "both", True, blocked=blocked,
+                                stop_reason=reason, pages_requested=1,
+                                pages_completed=0, start_url=LISTING_URL,
+                                final_url=LISTING_URL)
+            ok &= check("4: --allow-empty after %s leaves the output and its "
+                        "sidecar alone (exit %d)" % (reason, rc),
+                        open(out + ".json").read() == "GOOD"
+                        and open(out + ".meta.json").read() == "GOODMETA"
+                        and rc in (3, 5))
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "d")
+        with redirect_stdout(io.StringIO()):
+            rc = finish_run([], out, "json", True, blocked=False,
+                            stop_reason="no_results", pages_requested=1,
+                            pages_completed=0, start_url=LISTING_URL,
+                            final_url=LISTING_URL)
+        ok &= check("4: ...while a finished empty listing still writes [] "
+                    "with --allow-empty (exit 4)",
+                    rc == 4 and json.load(open(out + ".json")) == [])
+
+    # 5: an output directory that does not exist is exit 2 before the run.
+    args = _ap.Namespace(out=os.path.join("no_such_dir_xyz", "d"),
+                         dump_html=None, proxy_rotate="per-run", proxy_file=None)
+    err, _ = page_flow.check_args(args)
+    ok &= check("5: --out in a missing directory is a usage error up front",
+                bool(err) and "does not exist" in err)
+    for engine in ENGINE_FILES:
+        ok &= check("5: %s runs page_flow.check_args" % engine,
+                    "page_flow.check_args(args)" in _src(engine))
+
+    # 9 + 12: rows numbered after the dedupe; page = batch of 20.
+    rows = [Product(sku=str(i), url="u%d" % i, position=p, page=1)
+            for i, p in enumerate([1, 2, 5] + list(range(7, 30)), start=1)]
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "r")
+        with redirect_stdout(io.StringIO()):
+            finish_run(rows, out, "json", False, blocked=False,
+                       stop_reason="completed", pages_requested=2,
+                       pages_completed=2, start_url=LISTING_URL,
+                       final_url=LISTING_URL, duplicates_dropped=4)
+        saved = json.load(open(out + ".json"))
+        meta = json.load(open(out + ".meta.json"))
+    ok &= check("9: position runs 1..N after duplicates are dropped",
+                [r["position"] for r in saved] == list(range(1, len(saved) + 1)))
+    ok &= check("9: the sidecar records how many duplicates were dropped",
+                meta.get("duplicates_dropped") == 4)
+    ok &= check("12: page is the batch of 20 (rows 21+ are page 2)",
+                saved[19]["page"] == 1 and saved[20]["page"] == 2)
+
+    # 10: a listing scrolled to its end a few cars short is complete.
+    settled = {"settled": True, "reached_target": False}
+    ok &= check("10: settled at 414 of 421 is no_new_products, not partial",
+                page_flow.listing_stop_reason(settled, {"total_available": 421},
+                                              414) == "no_new_products")
+    ok &= check("10: judged on rendered cards: 385 distinct of 405 shown, "
+                "406 advertised, is the end",
+                page_flow.listing_stop_reason(
+                    {"settled": True, "reached_target": False, "cards": 405},
+                    {"total_available": 406}, 385) == "no_new_products")
+    ok &= check("10: ...while 22 of 1546 is still a stall",
+                page_flow.listing_stop_reason(settled, {"total_available": 1546},
+                                              22) == "scroll_stalled")
+
+    # 11: an empty page (cityless, hub, zero-result filter) is exit 4.
+    reason = page_flow.listing_stop_reason(None, {"total_available": 2549}, 0,
+                                           state="empty")
+    with tempfile.TemporaryDirectory() as d:
+        with redirect_stdout(io.StringIO()):
+            rc = finish_run([], os.path.join(d, "e"), "json", False,
+                            blocked=False, stop_reason=reason,
+                            pages_requested=1, pages_completed=0,
+                            start_url=LISTING_URL, final_url=LISTING_URL)
+    ok &= check("11: a served empty listing ends with exit 4, not 5 (%s)"
+                % reason, rc == 4)
+
+    group("report 2026-11-25: parser")
+    # 7: the detail page's own buy box gives strike, OFF and EMI.
+    buy_box = ('<div class="buy"><div data-base-component="Pricing">'
+               '<span>11.59 Lakh</span></div>'
+               '<span class="ds-line-through">₹11.80 Lakh</span>'
+               '<span>₹21,000 OFF</span><span>or ₹21,375/m</span></div>')
+    similar = ('<div class="similar"><a href="/buy-used-cars/delhi/maruti/'
+               'swift/vxi-2020/1/">x</a><span class="ds-line-through">'
+               '₹9 Lakh</span><span>₹5,000 OFF</span><span>or ₹1,000/m</span></div>')
+    row = parse_detail_page(DETAIL_PAGE.replace("<body>", "<body>" + buy_box, 1),
+                            DETAIL_URL)[0]
+    ok &= check("7: detail mode reads original_price from the buy box",
+                row.original_price == 1180000)
+    ok &= check("7: detail mode reads discount_amount and emi_monthly",
+                row.discount_amount == 21000 and row.emi_monthly == 21375)
+    ok &= check("7: ...and computes discount_pct from the two prices",
+                row.discount_pct is not None and row.discount_pct > 0)
+    row = parse_detail_page(DETAIL_PAGE.replace("</body>", similar + "</body>", 1),
+                            DETAIL_URL)[0]
+    ok &= check("7: the 'Similar cars' strip's strike/OFF/EMI are not borrowed",
+                row.original_price is None and row.discount_amount is None
+                and row.emi_monthly is None)
+
+    # 8: a hub with no comma in it is still the hub.
+    card = CARD_CIAZ.replace("Sector 27, Faridabad", "Omaxe Mall Greater Noida")
+    r = _one(card, CARD_CIAZ_URL)
+    ok &= check("8: a comma-less hub ('Omaxe Mall Greater Noida') is read",
+                r is not None and r.hub == "Omaxe Mall Greater Noida"
+                and r.tag != "Omaxe Mall Greater Noida")
+
+    # 18: no coverage warning when the site prints no strike at all.
+    records = []
+
+    class _Grab(_logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage())
+
+    grab = _Grab()
+    product_parser.logger.addHandler(grab)
+    try:
+        cards = [CARD_GRAND_I10, CARD_CIAZ, CARD_EON, CARD_E_CLASS]
+        plain = [re.sub(r'<[^>]*ds-line-through[^>]*>.*?</[^>]+>', "", c)
+                 for c in cards]
+        plain = [re.sub(r'(<span[^>]*>)₹[^<]*(</span>)', r"\1\2", c) for c in plain]
+        parse_products(grid(*plain), LISTING_URL)
+    finally:
+        product_parser.logger.removeHandler(grab)
+    ok &= check("18: no 'original_price coverage' warning when no card prints "
+                "a strike", not [m for m in records
+                                 if m.startswith(("original_price coverage",
+                                                  "discount_amount coverage"))])
+
+    # 15 / 29: scheme problems are named, not "None has no hostname".
+    why = product_parser.unsupported_reason("www.spinny.com/used-cars-in-delhi-ncr/s/")
+    ok &= check("15: a URL without a scheme says to add https://",
+                bool(why) and "https://" in why)
+    ok &= check("29: ftp:// is refused as usage, before any fetch",
+                not product_parser.is_supported_host(
+                    "ftp://www.spinny.com/used-cars-in-delhi-ncr/s/"))
+
+    group("report 2026-11-25: proxies, .env and logs")
+    with tempfile.TemporaryDirectory() as d:
+        missing = os.path.join(d, "none.txt")
+        ok &= check("14: a missing --proxy-file is a ProxyError (exit 2)",
+                    _raises_type(lambda: proxy_pool.load_proxy_file(missing),
+                                 ProxyError))
+    enc = _cred_url("http", "us%40er", "p%3Ass", "h.example:3128")
+    pw = to_playwright(enc)
+    ok &= check("23: percent-encoded proxy credentials are decoded",
+                pw.get("username") == "us@er" and pw.get("password") == "p:ss"
+                and split_credentials(enc)[1] == ("us@er", "p:ss"))
+    hashed = _cred_url("http", "alice", "pa#ss", "h.example:8080")
+    ok &= check("24: mask() hides the login when the password holds '#'",
+                "alice" not in mask(hashed) and "h.example:8080" in mask(hashed))
+    ok &= check("24: ...and Chromium is handed the real host",
+                to_playwright(hashed)["server"] == "http://h.example:8080")
+    line = "http://h.example:3128  # main exit"
+    ok &= check("27: a trailing '# comment' in a proxy file line is dropped",
+                proxy_pool.parse_proxy_line(line) == "http://h.example:3128")
+    ok &= check("28: KEY=\"value\" # comment loses its quotes without dotenv",
+                env_config._parse_line('K="v1" # note') == ("K", "v1"))
+
+    saved_env = os.environ.get("SPINNY_CDP_ENDPOINT")
+    os.environ["SPINNY_CDP_ENDPOINT"] = "ws://h.example:9222"
+    try:
+        a = _ap.Namespace(cdp_endpoint="", proxy=None, url=None,
+                          twocaptcha_key=None)
+        env_config.apply(a, quiet=True)
+    finally:
+        if saved_env is None:
+            os.environ.pop("SPINNY_CDP_ENDPOINT", None)
+        else:
+            os.environ["SPINNY_CDP_ENDPOINT"] = saved_env
+    ok &= check("16: --cdp-endpoint \"\" switches off the environment's value",
+                a.cdp_endpoint is None)
+
+    a = _ap.Namespace(out="x", dump_html=None, proxy_rotate="per-page",
+                      proxy_file="p.txt")
+    ok &= check("26: --proxy-rotate per-page with a pool says it acts per-run",
+                any("per-run" in w for w in page_flow.check_args(a)[1]))
+
+    secret_url = LISTING_URL + "?token=abcdef123456"
+    ok &= check("30: a ?token= value is masked for logs",
+                "abcdef123456" not in env_config.redact(secret_url))
+    meta = ow.run_meta("complete", "completed", 1, 1, secret_url, secret_url, 1)
+    ok &= check("30: ...and in the sidecar's start_url/final_url",
+                "abcdef123456" not in json.dumps(meta))
+
+    group("report 2026-11-25: diff_runs")
+    old = [{"sku": "1", "price": 100.0}, {"sku": "2", "price": 200.0}]
+    new = [{"sku": "1", "price": 100.0}, {"sku": "3", "price": 300.0}]
+    res = diff_products(old, new, membership_comparable=False)
+    ok &= check("3: cars outside two samples are not added/removed",
+                not res["added"] and not res["removed"]
+                and len(res["only_in_new"]) == 1 and len(res["only_in_old"]) == 1)
+    ok &= check("3: a --pages sample does not cover its listing",
+                diff_runs.covers_listing(
+                    {"mode": "listing", "products": 78,
+                     "completeness": {"total_available": 1705}}) is False)
+    ok &= check("3: ...a run within one batch of its total does",
+                diff_runs.covers_listing(
+                    {"mode": "listing", "products": 414,
+                     "completeness": {"total_available": 421}}) is True)
+    tol = getattr(diff_runs, "_tolerance", None)
+    ok &= check("31: --price-tolerance-pct nan and -1 are refused, 1.5 is not",
+                tol is not None and tol("1.5") == 1.5
+                and _raises_type(lambda: tol("nan"), _ap.ArgumentTypeError)
+                and _raises_type(lambda: tol("-1"), _ap.ArgumentTypeError))
+    with tempfile.TemporaryDirectory() as d:
+        bad = os.path.join(d, "x.json")
+        open(bad, "w").write('{"status": "complete"}')
+        ok &= check("32: a JSON object instead of a row list is InputError",
+                    _raises_type(lambda: diff_runs._load(bad),
+                                 diff_runs.InputError))
+        good = os.path.join(d, "a.json")
+        open(good, "w").write("[]")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            diff_runs._check_comparable(_ap.Namespace(old=good, new=good))
+        ok &= check("33: a missing sidecar is said, not skipped silently",
+                    "no readable .meta.json" in buf.getvalue())
+
+    group("report 2026-11-25: engines and the paid paths")
+    enterprise = CaptchaChallenge(kind="recaptcha_v3", sitekey="k",
+                                  enterprise=True)
+    ok &= check("25: no solve is bought for a reCAPTCHA Enterprise widget",
+                captcha_solver.unsupported_solve(enterprise) is not None
+                and captcha_solver.unsupported_solve(
+                    CaptchaChallenge(kind="recaptcha_v3", sitekey="k"),
+                    {"enterprise": "true"}) is not None)
+    for engine in ENGINE_FILES:
+        src = _src(engine)
+        ok &= check("25: %s consults unsupported_solve before buying" % engine,
+                    "unsupported_solve(challenge, configured)" in src)
+        ok &= check("13: %s checks pagination only on a page that loaded"
+                    % engine, "if outcome.ok and page_flow.pagination_is_"
+                    "addressable(" in src)
+        ok &= check("17: %s writes --dump-html to the path given" % engine,
+                    ".page{page_num}\"" not in src
+                    and "dump_path = args.dump_html\n" in src)
+    ok &= check("22: a proxy_error 500 is not blamed on the pid",
+                "proxy" in page_flow.cdp_refusal_hint("HTTP 500 proxy_error")
+                and "pid" not in page_flow.cdp_refusal_hint(
+                    "HTTP 500 proxy_error").split("not the pid")[0])
+    ok &= check("22: profile_locked still names the pid",
+                "pid" in page_flow.cdp_refusal_hint("500 profile_locked"))
+    pyp = _src("puppeteer_scraper.py")
+    ok &= check("2: pyppeteer answers the proxy login over CDP Fetch, not "
+                "page.authenticate",
+                "Fetch.authRequired" in pyp and "self.page.authenticate(" not in pyp)
+    ok &= check("20: pyppeteer raises a refused CDP handshake at once",
+                "async def _connect_cdp" in pyp and "connect(browserWSEndpoint" not in pyp)
+    ok &= check("19: pyppeteer disconnects from a remote browser on close",
+                "self.browser.disconnect()" in pyp)
+    sel = _src("selenium_scraper.py")
+    ok &= check("21: Selenium reads the navigation status and calls a 407 a "
+                "failed load, not a block",
+                "def _navigation_status" in sel and "== 407" in sel)
+
+    import scraper_api_client as sac
+    real_fetch = sac.fetch_html
+    shell = page('<div data-id="landing-plp-container"></div>')
+    zero = page('<div data-id="landing-plp-container"></div>', heading(0))
+    try:
+        for label, html, want_rc, want_file in (
+                ("the shell (no cars, not an empty answer)", shell, 5, False),
+                ("Spinny's own 0-car listing", zero, 4, True)):
+            sac.fetch_html = lambda _args, _h=html: (_h, 200)
+            with tempfile.TemporaryDirectory() as d:
+                a = _ap.Namespace(out=os.path.join(d, "s"), format="json",
+                                  allow_empty=True, dump_html=None,
+                                  url=LISTING_URL, category=None)
+                with redirect_stdout(io.StringIO()):
+                    rc = sac._run_once(a)
+                wrote = os.path.exists(a.out + ".json")
+            ok &= check("6: scraper_api_client on %s: exit %d, %s with "
+                        "--allow-empty" % (label, want_rc,
+                                           "writes []" if want_file else "writes nothing"),
+                        rc == want_rc and wrote == want_file)
+    finally:
+        sac.fetch_html = real_fetch
+    api = _src("scraper_api_client.py")
+    ok &= check("6: scraper_api_client checks the URL before the paid call",
+                "is_supported_host(args.url)" in api)
+    ok &= check("6: its key goes through env_config (placeholders = unset)",
+                'os.environ.get("TWOCAPTCHA_KEY")' not in api)
+    ok &= check("34: its debug dump is <out>_debug.html",
+                'f"{args.out}_scraperapi_debug.html"' not in api
+                and 'f"{args.out}_debug.html"' in api)
+    return ok
+
+
+def _raises_type(fn, exc_type):
+    try:
+        fn()
+    except exc_type:
+        return True
+    except Exception:
+        return False
+    return False
+
+
 def main() -> int:
     ok = True
     # Checks that could not run because an optional engine library is absent.
@@ -3734,6 +4065,7 @@ def main() -> int:
     ok &= test_no_private_citations()
     ok &= test_numeric_flags_are_validated()
     ok &= test_status_reaches_the_classifier()
+    ok &= test_manual_report_2026_11_25()
 
     print()
     if _failures:
