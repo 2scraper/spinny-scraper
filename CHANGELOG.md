@@ -13,6 +13,8 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-25
+
 > **Behaviour change:** `--allow-empty` now writes empty output only for a run
 > that FINISHED and found nothing (exit 4). A blocked run or one that never
 > got its page (exit 3/5) leaves the previous output and its sidecar alone,
@@ -404,6 +406,7 @@ at all. It is kept because it is family core and is the right tool on sites
 whose grid is server-rendered — and because family core that exists in five
 repos and is exercised in four is how untested inheritance ships.
 
+[0.3.0]: https://github.com/2scraper/spinny-scraper/releases/tag/v0.3.0
 [0.2.0]: https://github.com/2scraper/spinny-scraper/releases/tag/v0.2.0
 [0.1.2]: https://github.com/2scraper/spinny-scraper/releases/tag/v0.1.2
 [0.1.1]: https://github.com/2scraper/spinny-scraper/releases/tag/v0.1.1
