@@ -13,8 +13,55 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ## [Unreleased]
 
+> **Behaviour change:** `--allow-empty` now writes empty output only for a run
+> that FINISHED and found nothing (exit 4). A blocked run or one that never
+> got its page (exit 3/5) leaves the previous output and its sidecar alone,
+> with or without the flag; it used to replace a good file with `[]`.
+>
+> **Behaviour change:** `position` is now numbered 1..N over the rows in the
+> file, after duplicates are dropped, and `page` is the batch of 20 a row
+> falls in (the unit of `--pages`). They used to be the card's slot in the
+> grid (with gaps where repeats were dropped) and the scroll ROUND the card
+> arrived in. The sidecar gains `duplicates_dropped`.
+>
+> **Behaviour change:** `diff_runs.py` no longer reports cars that are
+> missing from a `--pages` sample as `removed`/`added`. When either run holds
+> less than its listing's advertised total, those cars are listed as
+> `only_in_old`/`only_in_new` and `--fail-on-change` ignores them; price
+> changes on cars both runs hold still count.
+>
+> **Behaviour change:** `scraper_api_client.py` exits 5 (not 4) when the page
+> came back without cars and was not Spinny's own empty answer — which is
+> what a single fetch of a listing gets.
+
+### Fixed
+
+- The Docker image builds again: Playwright 1.65 needs `libatomic1`, which `python:3.12-slim` lacks; it is installed before `playwright install`.
+- pyppeteer: a proxy with a login works again. The login is answered over CDP `Fetch.authRequired`; `page.authenticate()` used a CDP method current Chromium no longer has and crashed every such run.
+- pyppeteer over `--cdp-endpoint`: a refused or closed endpoint fails at once with exit 5 instead of waiting 30 s and exiting 1, and a successful run no longer ends with an "Event loop is closed" traceback (the connection is now disconnected, not left open).
+- An empty listing page — a filter nothing matches, a URL with no city, the `/used-cars` landing page — exits 4 as documented, not 5.
+- A listing scrolled to its end that comes up a few cars short of its advertised total (within one batch, e.g. 414 of 421) is `complete`, not `partial`.
+- `--mode detail` reads the strike price, the rupee discount and the monthly EMI from the car's own price box (the "Similar cars" strip is excluded). `discount_pct` is computed from them.
+- `hub` is read from its own slot on the card, so a hub without a comma ("Omaxe Mall Greater Noida") is no longer null.
+- `original_price` / `discount_amount` coverage warnings fire only when a card prints a strike or a rupee badge that was not read, not when the site simply has no discounts.
+- `--out` or `--dump-html` in a directory that does not exist is exit 2 before the browser starts, instead of a traceback after the whole scroll.
+- `--dump-html` writes to the path given; it no longer appends `.page1`.
+- Playwright with a dead proxy exits 5 instead of a traceback and exit 1.
+- Selenium: a proxy that answers 407 is reported as a failed load (exit 5), not as Spinny blocking the run (exit 3).
+- No engine buys a captcha solve for a reCAPTCHA Enterprise widget, which this project does not implement. Selenium with `--solve-captcha always` used to pay for one on every Spinny page.
+- A refused `--cdp-endpoint` is explained from the response body: `proxy_error` is no longer described as "another run holds this pid".
+- Proxy URLs: percent-encoded logins and passwords are decoded; a `#` in a password no longer exposes the login in the log; a trailing `# comment` in a `--proxy-file` line is allowed; a missing `--proxy-file` is exit 2.
+- `.env`: `KEY="value" # comment` keeps no quotes without python-dotenv; `--cdp-endpoint ""` and `--proxy ""` switch off a value set in `.env`.
+- URLs without `https://` and non-http schemes (`ftp://`) are exit 2 with a reason, in all engines and in `scraper_api_client.py`.
+- Secret-looking query values (`?token=`, `?key=` …) are masked in logs and in the sidecar's URLs.
+- `scraper_api_client.py`: refuses a non-Spinny URL, a detail URL and a placeholder key before the paid call; `--allow-empty` works for an empty listing; the debug dump is `<out>_debug.html`.
+- `diff_runs.py`: `--price-tolerance-pct nan` or a negative value is exit 2; a JSON file that is not a row list is exit 2 with a message, not a traceback; a missing sidecar is reported.
+- `--proxy-rotate per-page` with a proxy pool now says that a Spinny run fetches one page, so it behaves like `per-run`.
+- `--min-score` accepts only 0.3, 0.7 or 0.9 (it accepted `nan` and `0.5`).
+
 ### Changed
 
+- CI only: the offline job runs on `ubuntu-24.04`; `ubuntu-latest` (26.04) has no Python 3.9, so the 3.9 row failed before running anything.
 - CI only: the scheduled canary now starts at 07:27 UTC (Mondays) instead of 06:23, so canaries that share one Scraping Browser profile no longer start at the same time and lock each other out.
 - CI only: the canary now runs weekly (Mondays 06:23 UTC) and on a manual dispatch, with its optional secrets `SPINNY_CDP_ENDPOINT`, `TWOCAPTCHA_KEY` passed on every run; the daily schedule is removed.
 

@@ -35,16 +35,26 @@ Four buckets, each keyed on sku:
 A product this project's parser could not recover a sku for (None) cannot be
 matched across runs at all, so it is counted and reported separately rather
 than silently folded into "added"/"removed", which would be wrong on its face.
+
+SAMPLES ARE NOT CATALOGUES. A listing run with --pages N holds the first
+N x 20 cars of a listing of ~1700, in an order Spinny reshuffles between
+loads — two runs a minute apart at --pages 3 held 61, 78, 80, 96 and 100
+cars. A car missing from such a run was not reached, not sold. So when
+either side's sidecar shows it holds less than the listing's advertised
+total, added/removed are reported as `only_in_new` / `only_in_old` — seen
+in one sample — and --fail-on-change ignores them; price changes on cars
+both runs hold are still reported and still count. Runs that each cover
+the whole listing (within one batch of its total) diff membership as before.
 """
 
 import argparse
 import json
-import pathlib
+import math
 import re
 import sys
 from typing import Dict, List, Optional, Tuple
 
-from output_writer import UNIQUE_BY_SKU_MODES
+from output_writer import CARDS_PER_BATCH, UNIQUE_BY_SKU_MODES
 
 # What a price monitor watching Spinny actually wants to be told about.
 #
@@ -72,9 +82,42 @@ TRACKED_FIELDS = ("price", "original_price", "discount_pct", "currency",
 PRICE_FIELDS = ("price", "original_price", "discount_pct")
 
 
+class InputError(ValueError):
+    """An input file that is not this project's JSON output."""
+
+
 def _load(path: str) -> List[dict]:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """A run's rows; InputError (exit 2) for anything that is not a list of
+    objects — a sidecar or a diff passed by mistake used to end in an
+    AttributeError traceback."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            rows = json.load(f)
+    except (OSError, ValueError) as e:
+        raise InputError(f"{path}: cannot read it as JSON ({e})") from None
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        raise InputError(
+            f"{path}: expected a JSON LIST of rows, as the scrapers write, "
+            f"and found a {type(rows).__name__}. Pass the run's .json "
+            f"output, not its .meta.json or a diff.")
+    return rows
+
+
+def _tolerance(value: str) -> float:
+    """argparse type for --price-tolerance-pct: a finite number >= 0.
+
+    `nan` used to be accepted, and every comparison with NaN is False, so a
+    +50% price move counted as "within tolerance" and --fail-on-change
+    exited 0."""
+    try:
+        number = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"--price-tolerance-pct must be a number, not {value!r}") from None
+    if not math.isfinite(number) or number < 0:
+        raise argparse.ArgumentTypeError(
+            f"--price-tolerance-pct must be a finite number >= 0, not {value}")
+    return number
 
 
 def _by_sku(products: List[dict]) -> Tuple[Dict[str, dict], int]:
@@ -134,12 +177,19 @@ def _within_tolerance(before: dict, after: dict, changes: dict,
 
 
 def diff_products(old: List[dict], new: List[dict],
-                  price_tolerance_pct: float = 0.0) -> dict:
+                  price_tolerance_pct: float = 0.0,
+                  membership_comparable: bool = True) -> dict:
+    """`membership_comparable=False` when either run is a sample of its
+    listing (see the module docstring): cars in one run only are then
+    `only_in_old` / `only_in_new`, not `removed` / `added`."""
     old_by_sku, old_unmatchable = _by_sku(old)
     new_by_sku, new_unmatchable = _by_sku(new)
 
     added = [new_by_sku[sku] for sku in new_by_sku.keys() - old_by_sku.keys()]
     removed = [old_by_sku[sku] for sku in old_by_sku.keys() - new_by_sku.keys()]
+    only_in_new, only_in_old = [], []
+    if not membership_comparable:
+        only_in_new, only_in_old, added, removed = added, removed, [], []
 
     changed, source_changed, within_tolerance = [], [], []
     for sku in old_by_sku.keys() & new_by_sku.keys():
@@ -189,6 +239,8 @@ def diff_products(old: List[dict], new: List[dict],
     return {
         "added": added,
         "removed": removed,
+        "only_in_new": only_in_new,
+        "only_in_old": only_in_old,
         "changed": changed,
         "source_changed": source_changed,
         "within_tolerance": within_tolerance,
@@ -221,6 +273,15 @@ def _print_summary(result: dict) -> None:
         print(f"  ? {c['sku']}  {c['title']}  {deltas}  "
               f"[price_source {src['old']!r} -> {src['new']!r}: the two runs "
               f"rendered differently, so this is not a site-side price change]")
+    sampled = len(result.get("only_in_new", [])) + len(result.get("only_in_old", []))
+    if sampled:
+        print(f"[i] {len(result['only_in_new'])} car(s) only in --new and "
+              f"{len(result['only_in_old'])} only in --old. At least one run "
+              f"holds part of its listing, so a car missing from it was not "
+              f"reached rather than sold; these are not counted as added/"
+              f"removed and do not trip --fail-on-change. Run with --pages "
+              f"large enough to reach the end of the listing to diff "
+              f"membership.")
     unmatchable = result["unmatchable_old"] + result["unmatchable_new"]
     if unmatchable:
         print(f"[!] {unmatchable} row(s) across both files had no sku or a "
@@ -243,6 +304,37 @@ def _run_status(path: str) -> Tuple[Optional[str], Optional[dict]]:
     return meta.get("status"), meta
 
 
+def covers_listing(meta: Optional[dict]) -> Optional[bool]:
+    """Whether a run holds its whole listing; None when it cannot be told.
+
+    A detail run is one car and always "whole". A listing run is whole when
+    it holds the listing's advertised total, give or take one batch — the
+    same allowance page_flow.listing_stop_reason makes for a listing scrolled
+    to its real end that still comes up a few cars short of its heading.
+    """
+    if not meta:
+        return None
+    if meta.get("mode") == "detail":
+        return True
+    total = (meta.get("completeness") or {}).get("total_available",
+                                                 meta.get("total_available"))
+    products = meta.get("products")
+    if not isinstance(total, int) or not isinstance(products, int):
+        return None
+    # The cards the grid rendered, before repeats were dropped: a listing
+    # scrolled to its end shows ~all of its total but holds fewer DISTINCT
+    # cars, because the grid repeats some (see page_flow.listing_stop_reason).
+    rendered = max(products, (meta.get("scroll") or {}).get("cards") or 0,
+                   (meta.get("completeness") or {}).get("rows_collected") or 0)
+    return total - rendered <= CARDS_PER_BATCH
+
+
+def membership_comparable(args) -> bool:
+    """True only when BOTH runs are known to cover their whole listing."""
+    return all(covers_listing(_run_status(path)[1]) is True
+               for path in (args.old, args.new))
+
+
 def _check_comparable(args) -> bool:
     """Refuse an assortment diff between runs that are not both complete.
 
@@ -258,7 +350,13 @@ def _check_comparable(args) -> bool:
     for label, path in (("--old", args.old), ("--new", args.new)):
         status, meta = _run_status(path)
         if status is None:
-            continue  # no sidecar: nothing to check, see _run_status
+            # Said, not skipped silently: without the sidecar neither the mode
+            # (a listing against a detail run) nor completeness can be
+            # checked, and membership is treated as a sample.
+            print(f"[!] {label} {path}: no readable .meta.json beside it, so "
+                  f"its mode and completeness cannot be checked. Its cars "
+                  f"are compared on price; membership is not.")
+            continue
         mode = (meta or {}).get("mode")
         if mode:
             modes[label] = mode
@@ -303,9 +401,9 @@ def _check_comparable(args) -> bool:
     currencies = {}
     for label, path in (("--old", args.old), ("--new", args.new)):
         try:
-            rows = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
+            rows = _load(path)
+        except InputError:
+            continue            # reported by main(), with the reason
         seen = {r.get("currency") for r in rows if r.get("currency")}
         if len(seen) == 1:
             currencies[label] = seen.pop()
@@ -346,7 +444,7 @@ def parse_args():
     p.add_argument("--new", required=True, help="Later run's JSON output.")
     p.add_argument("--out", default=None,
                    help="Write the full diff as JSON to this path too.")
-    p.add_argument("--price-tolerance-pct", type=float, default=0.0,
+    p.add_argument("--price-tolerance-pct", type=_tolerance, default=0.0,
                    metavar="PCT",
                    help="Treat a price move smaller than PCT%% as an exchange-"
                         "rate tick rather than a price change: reported "
@@ -358,7 +456,10 @@ def parse_args():
                         "only with a reason you can state.")
     p.add_argument("--fail-on-change", action="store_true",
                    help="Exit 1 if anything was added, removed or changed — "
-                        "for a cron job that should only notify on a real diff.")
+                        "for a cron job that should only notify on a real diff. "
+                        "Added/removed count only when both runs cover their "
+                        "whole listing; a car missing from a --pages sample was "
+                        "not reached, not sold.")
     p.add_argument("--force", action="store_true",
                    help="Diff even when a run's .meta.json says it was partial "
                         "or failed. Products never fetched by the short run will "
@@ -374,11 +475,12 @@ def main() -> int:
     try:
         old = _load(args.old)
         new = _load(args.new)
-    except (OSError, json.JSONDecodeError) as e:
-        print(f"[!] Could not read one of the input files: {e}")
+    except InputError as e:
+        print(f"[!] {e}")
         return 2
 
-    result = diff_products(old, new, price_tolerance_pct=args.price_tolerance_pct)
+    result = diff_products(old, new, price_tolerance_pct=args.price_tolerance_pct,
+                           membership_comparable=membership_comparable(args))
     _print_summary(result)
 
     if args.out:

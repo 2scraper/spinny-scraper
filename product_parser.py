@@ -160,8 +160,22 @@ def site_host(url: str) -> Optional[str]:
 
 
 def unsupported_reason(url: str) -> Optional[str]:
-    """Why this URL cannot be scraped, or None if it can be."""
-    host = (urlsplit(url).hostname or "").lower()
+    """Why this URL cannot be scraped, or None if it can be.
+
+    The scheme is checked first. `www.spinny.com/used-cars-in-delhi-ncr/s/`
+    has no scheme, so urlsplit reads it as a PATH and the old message was
+    "None has no hostname"; `ftp://www.spinny.com/...` passed the host check
+    and failed in the browser as a fetch error (exit 5) instead of exit 2.
+    """
+    parts = urlsplit((url or "").strip())
+    scheme = (parts.scheme or "").lower()
+    if not scheme or (not parts.netloc and scheme not in ("http", "https")):
+        return ("has no http:// or https:// in front of it — pass the full "
+                "address, e.g. https://www.spinny.com/used-cars-in-delhi-ncr/s/")
+    if scheme not in ("http", "https"):
+        return (f"uses {scheme}://, and Spinny is served over https:// only — "
+                f"pass the https:// address")
+    host = (parts.hostname or "").lower()
     if not host:
         return "has no hostname"
     if host in UNSUPPORTED:
@@ -229,6 +243,14 @@ SELECTORS = {
     # Every text node in a card, read by PATTERN rather than by position —
     # see the module docstring.
     "card_text": 'span[data-base-component="text"]',
+    # The hub, by its own slot: a muted small-print span in a no-wrap,
+    # overflow-clipped box, which is how the card lays out the one line that
+    # names the place. Measured 2026-11-25 on a live Delhi grid: 60 of 62
+    # cards carry the slot (the other two print no hub), and it holds both
+    # "Dwarka, Delhi" and "Omaxe Mall Greater Noida" — a hub with no comma,
+    # which the old comma rule read as nothing on ~12% of a 1526-car run.
+    "hub": ('div.ds-overflow-hidden.ds-whitespace-nowrap > '
+            'span.ds-text-surface-text-gray-muted'),
     "card_heading": 'h3',
     # The listing's own advertised total: `<span>1559</span><h1>Used cars in
     # Delhi NCR</h1>`. This is the completeness oracle — 482 rows
@@ -1382,6 +1404,17 @@ def _card_fields(card) -> Dict[str, object]:
     # headline: "Sportz 1.2 Kappa VTVT". 705/705.
     if leftover:
         found["variant"] = leftover[0]
+    # The hub's own slot first (see SELECTORS["hub"]); the comma rule below
+    # is only the fallback for markup without that slot.
+    slot = card.select_one(SELECTORS["hub"])
+    slot_text = (re.sub(r"\s{2,}", " ", slot.get_text(" ", strip=True))
+                 if slot is not None else "")
+    if slot_text and slot_text in leftover[1:]:
+        found["hub"] = slot_text
+        rest = [t for t in leftover[1:] if t != slot_text]
+        if rest:
+            found["tag"] = rest[-1]
+        return found
     # The hub is the one that names a place, and a place has a comma in it —
     # "Sector 27, Faridabad", "Raj Nagar Extension, Ghaziabad". The
     # editorial tag does not ("High quality, less driven" does, which is why
@@ -1456,39 +1489,16 @@ def _card_image(card) -> Optional[str]:
     return src
 
 
-def _page_of(position: int, boundaries: Optional[Sequence[int]],
-             default: int) -> int:
-    """Which scroll batch a card at `position` first appeared in.
-
-    `boundaries[i]` is how many cards the grid held after batch i+1 — a count
-    the engine takes through the browser after every scroll round, which is a
-    cheap `querySelectorAll().length` rather than a re-parse of a 15 MB
-    document.
-
-    A card at position p belongs to the FIRST batch whose count reached p.
-    With no boundaries (a single-shot parse, or --mode detail) every row gets
-    `default`.
-    """
-    if not boundaries:
-        return default
-    for i, count in enumerate(boundaries, start=1):
-        if position <= count:
-            return i
-    return len(boundaries)
-
-
 def parse_products(html: str, url: str, page: int = 1,
-                   category: Optional[str] = None,
-                   page_boundaries: Optional[Sequence[int]] = None) -> List[Product]:
+                   category: Optional[str] = None) -> List[Product]:
     """Every car in the grid, in the order Spinny laid them out.
 
     One path, not two: there is no structured data on a listing page to
     prefer. See the module docstring.
 
-    `page_boundaries` is how a run that scrolled one long page still reports
-    a meaningful `page` per row — see `_page_of`. It is optional so the
-    signature stays compatible with the rest of the family, and so a caller
-    with a single snapshot can pass nothing.
+    `page` is `page` on every row here and `position` is the card's slot in
+    the grid; output_writer.finish_run renumbers both once the run's rows are
+    merged and deduplicated.
     """
     soup = BeautifulSoup(html or "", "html.parser")
     cards = _cards(soup, url)
@@ -1499,6 +1509,9 @@ def parse_products(html: str, url: str, page: int = 1,
     host = site_host(url) or SOURCE_DEFAULT
     rows: List[Product] = []
     attr_mismatches = 0
+    # How many cards PRINT a strike and a rupee badge at all — the base the
+    # coverage of those two columns is judged against. See _report_coverage.
+    shown = {"original_price": 0, "discount_amount": 0}
 
     for position, card in enumerate(cards, start=1):
         link = card.select_one(SELECTORS["item_link"])
@@ -1508,6 +1521,9 @@ def parse_products(html: str, url: str, page: int = 1,
 
         price, strike = _card_price(card)
         fields = _card_fields(card)
+        shown["original_price"] += card.select_one(SELECTORS["strike_price"]) is not None
+        shown["discount_amount"] += any(
+            t.lstrip().startswith("₹") for t in _card_text_nodes(card))
 
         # The shortlist heart carries the EXACT all-in price and Spinny's own
         # quality tier. `data-label` on the same element is the car id, and
@@ -1551,7 +1567,7 @@ def parse_products(html: str, url: str, page: int = 1,
             image_url=_card_image(card),
             category=cat,
             price_source="dom+attr" if all_in is not None else "dom",
-            page=_page_of(position, page_boundaries, page),
+            page=page,
             position=position,
             model=model_from_headline(title, make_display(parts["make"]),
                                       parts["model"]),
@@ -1576,7 +1592,7 @@ def parse_products(html: str, url: str, page: int = 1,
             "their own URL — the card scope may be wrong, which is how one "
             "car reports its neighbour's price: %s",
             attr_mismatches, len(rows), url)
-    _report_coverage(rows, url)
+    _report_coverage(rows, url, shown=shown)
     return rows
 
 
@@ -1606,23 +1622,42 @@ _COVERAGE_FLOORS = {
     "assurance": 0.98,        # measured 705/705
     "emi_monthly": 0.95,      # measured 700/705
     "hub": 0.90,              # measured 695/705
-    "original_price": 0.80,   # measured 685/705
-    "discount_amount": 0.80,  # measured 685/705
+    # These two are judged against the cards that PRINT the value, not
+    # against every card: whether a car is discounted is the site's choice.
+    # On 2026-11-25 no Delhi card carried a strike at all, and on 2026-11-22
+    # ~92% did but a third of the badges read "Ends today" instead of an
+    # amount — both honest nulls, and both fired a "markup may have changed"
+    # warning on every run. A strike or ₹ badge printed and not read is the
+    # fault this is for.
+    "original_price": 0.98,
+    "discount_amount": 0.98,
 }
 
 
-def _report_coverage(rows: Sequence[Product], url: str) -> None:
+def _report_coverage(rows: Sequence[Product], url: str,
+                     shown: Optional[Dict[str, int]] = None) -> None:
     if not rows:
         return
     total = len(rows)
+    shown = shown or {}
     for field, floor in _COVERAGE_FLOORS.items():
         got = sum(1 for r in rows if getattr(r, field, None) is not None)
-        share = got / total
+        base = total
+        if field in ("original_price", "discount_amount"):
+            # Judged only against the cards that print one; none printed is
+            # not a fault. Without the count, nothing to judge against.
+            base = min(total, shown.get(field, 0))
+            if not base:
+                continue
+            got = min(got, base)
+        share = got / base
         if share < floor:
             logger.warning(
-                "%s coverage %.0f%% (%d/%d), below the %.0f%% this site "
+                "%s coverage %.0f%% (%d/%d%s), below the %.0f%% this site "
                 "normally gives — the markup may have changed: %s",
-                field, share * 100, got, total, floor * 100, url)
+                field, share * 100, got, base,
+                "" if base == total else " of the cards that print one",
+                floor * 100, url)
 
     # The two price bases, checked against each other. `price_all_in` was
     # HIGHER than `price` on 482 of 482 Delhi tiles, because it includes RC
@@ -1903,6 +1938,62 @@ def _overview_pairs(soup) -> Dict[str, str]:
     return out
 
 
+_DETAIL_EMI_RE = re.compile(r'₹\s*(' + _AMOUNT + r')\s*/\s*m(?:onth)?\b', re.I)
+_DETAIL_OFF_RE = re.compile(r'₹\s*(' + _AMOUNT + r')\s*OFF\b', re.I)
+
+
+def _buy_box(soup):
+    """The detail page's own price box, or None.
+
+    The smallest element holding both the price node and the "₹N/m" EMI
+    line, provided it holds no link to a car page — a detail page also
+    carries a "Similar cars" strip with strikes, badges and EMIs of OTHER
+    cars, which is why these columns were left null rather than read from
+    the whole page. Measured 2026-11-25 on car 34178047: a 3.6 KB box
+    reading "Car price · 5.78 Lakh · +On-road charges & taxes · or
+    ₹9,911/m · Starting EMI".
+    """
+    price_node = soup.select_one(SELECTORS["price"])
+    if price_node is None:
+        return None
+    for box in price_node.parents:
+        if box.name in (None, "body", "html", "[document]"):
+            return None
+        if box.select_one('a[href*="/buy-used-cars/"]') is not None:
+            return None
+        if _DETAIL_EMI_RE.search(box.get_text(" ", strip=True)):
+            return box
+    return None
+
+
+def _buy_box_prices(soup) -> Dict[str, Optional[float]]:
+    """Strike, rupee discount and monthly EMI printed in the buy box.
+
+    The strike is the same `.ds-line-through` node a listing card uses, and
+    "₹21,000 OFF" / "₹21,375/m" are the wording the 2026-11-16 report quotes
+    from car 33395555. No discounted car was on the site on 2026-11-25, so
+    the strike and OFF reads are checked against that markup in the offline
+    suite, not against a live page; the EMI is checked live.
+    """
+    out: Dict[str, Optional[float]] = {
+        "original_price": None, "discount_amount": None, "emi_monthly": None}
+    box = _buy_box(soup)
+    if box is None:
+        return out
+    strike = box.select_one(SELECTORS["strike_price"])
+    if strike is not None:
+        out["original_price"] = scaled_price(strike.get_text("", strip=True))
+    text = re.sub(r"\s+", " ", box.get_text(" ", strip=True))
+    off = _DETAIL_OFF_RE.search(text)
+    if off:
+        out["discount_amount"] = _normalize_amount(off.group(1))
+    emi = _DETAIL_EMI_RE.search(text)
+    if emi:
+        val = _normalize_amount(emi.group(1))
+        out["emi_monthly"] = int(round(val)) if val is not None else None
+    return out
+
+
 _MONTH_NAMES = ("january february march april may june july august "
                 "september october november december").split()
 
@@ -1990,6 +2081,8 @@ def parse_detail_page(html: str, url: str,
     if year and brand and model:
         title = f"{year} {brand} {model}"
 
+    shown = _buy_box_prices(soup)
+
     currency = None
     if offer and isinstance(offer.get("priceCurrency"), str):
         currency = offer["priceCurrency"].strip().upper() or None
@@ -2007,11 +2100,10 @@ def parse_detail_page(html: str, url: str,
         # DOM. Falls back to INR only when a price was found and the page
         # stated no currency.
         currency=currency or (CURRENCY if price is not None else None),
-        # A detail page prints no strike of its own — 0 line-through nodes on
-        # the captured page — and the "Similar cars" strip's strikes belong
-        # to other cars. So this is null in detail mode rather than borrowed.
-        original_price=None,
-        discount_pct=None,
+        # From the buy box only (see _buy_box): the "Similar cars" strip's
+        # strikes, badges and EMIs belong to other cars.
+        original_price=shown["original_price"],
+        discount_pct=_discount_from(price, shown["original_price"]),
         rating=None,
         review_count=None,
         in_stock=availability,
@@ -2037,8 +2129,8 @@ def parse_detail_page(html: str, url: str,
         car_city=parts.get("city"),
         assurance=None,
         price_all_in=_offer_price(offer),
-        discount_amount=None,
-        emi_monthly=None,
+        discount_amount=shown["discount_amount"],
+        emi_monthly=shown["emi_monthly"],
         tag=None,
         km_driven_exact=km_exact,
         owners=_to_int(node.get("numberOfPreviousOwners")),

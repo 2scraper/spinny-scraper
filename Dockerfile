@@ -17,6 +17,14 @@ WORKDIR /app
 # the INSTALLING user's home, so the non-root user below would not find it.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+# libatomic1 BEFORE the pip/playwright layer: Playwright 1.65 (2026-11-09)
+# bundles a node that needs libatomic.so.1, which python:3.12-slim (Debian 13)
+# lacks, and the `playwright` CLI itself runs on that node — so
+# `playwright install --with-deps` dies (exit 127) before it could add it.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libatomic1 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt requirements-playwright.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-playwright.txt \
     # Playwright's own apt-get for Chromium's shared-library dependencies —

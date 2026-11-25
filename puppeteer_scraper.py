@@ -28,7 +28,7 @@ And two things to know before choosing this engine:
   * **pyppeteer is effectively unmaintained** and its own README points at
     Playwright. It is here for parity, and for anyone who already has it.
   * pyppeteer cannot authenticate a proxy on the command line either, so
-    credentials go through `page.authenticate` — never into argv, where
+    credentials go over CDP (Fetch.authRequired) — never into argv, where
     anything that can run `ps` would read them.
 
 Usage
@@ -62,11 +62,13 @@ from typing import List, Optional
 # It also let CI install pyppeteer 0.0.25 (a stub, resolved from an unpinned
 # `pip install pyppeteer`) without anything failing, because nothing ever
 # imported it.
-from pyppeteer import launch, connect
+from pyppeteer import launch
+from pyppeteer.browser import Browser
+from pyppeteer.connection import Connection
 
 from captcha_solver import (detect_recaptcha_v3, detect_recaptcha_in_page,
                             reconcile_detections, solve_recaptcha,
-                            INJECT_TOKEN_JS)
+                            unsupported_solve, INJECT_TOKEN_JS)
 from product_parser import (parse_products, parse_detail_page,
                             car_metadata, detect_bot_challenge,
                             listing_kind, site_host, is_supported_host,
@@ -195,17 +197,26 @@ class _AsyncBridge:
         Cancelling first is the fix, and it has to happen ON the loop thread —
         `call_soon_threadsafe` is what gets it there.
         """
-        def _cancel_and_stop():
-            pending = [t for t in asyncio.all_tasks(self.loop)
-                       if t is not asyncio.current_task(self.loop)]
+        async def _cancel_and_wait():
+            # Cancelled AND awaited: a task cancelled but never run to its
+            # end leaves its websocket transport to the garbage collector,
+            # which then schedules the close on a loop that has gone —
+            # "RuntimeError: Event loop is closed" under a successful run.
+            pending = [t for t in asyncio.all_tasks()
+                       if t is not asyncio.current_task()]
             for task in pending:
                 task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
             if pending:
                 logger.debug("Cancelled %d pending pyppeteer task(s) on "
                              "teardown.", len(pending))
-            self.loop.stop()
 
-        self.loop.call_soon_threadsafe(_cancel_and_stop)
+        try:
+            asyncio.run_coroutine_threadsafe(
+                _cancel_and_wait(), self.loop).result(5)
+        except Exception as e:  # noqa: BLE001 — teardown must not mask the result
+            logger.debug("Ignoring error while draining pyppeteer tasks: %s", e)
+        self.loop.call_soon_threadsafe(self.loop.stop)
         self._thread.join(timeout=5)
 
 
@@ -265,6 +276,99 @@ def _mask_credentials(text: str) -> str:
     return _CREDENTIALS_IN_URL_RE.sub(r"\1***:***@", text or "")
 
 
+async def _connect_cdp(endpoint: str, timeout_s: float = CONNECT_TIMEOUT):
+    """pyppeteer's connect(), watching the websocket handshake.
+
+    pyppeteer opens the websocket in a background task and then waits for an
+    answer that a refused handshake never sends: a closed port, or a Scraping
+    Browser answering 500, waited the full 30 s and then printed a traceback
+    with exit 1 (report of 2026-11-25). The same steps as pyppeteer 2.0's
+    connect(), except that the handshake's own failure is raised at once as
+    an exit-5 "could not connect" error. Ported from zimmo-scraper.
+    """
+    loop = asyncio.get_event_loop()
+    connection = Connection(endpoint, loop, 0)
+    recv = connection._recv_fut
+    deadline = loop.time() + timeout_s
+    # Not connection.send() before the socket is open: its sender task polls
+    # for the connection with no timeout of its own.
+    while not connection._connected and not recv.done():
+        if loop.time() > deadline:
+            recv.cancel()
+            raise RuntimeError(
+                f"could not connect to --cdp-endpoint "
+                f"{_mask_credentials(endpoint)}: no answer within "
+                f"{timeout_s:.0f}s")
+        await asyncio.sleep(0.05)
+    if recv.done():
+        error = None if recv.cancelled() else recv.exception()
+        status = getattr(error, "status_code", None)
+        text = _mask_credentials(str(error))
+        raise RuntimeError(
+            f"could not connect to --cdp-endpoint "
+            f"{_mask_credentials(endpoint)}"
+            f"{f' (HTTP {status})' if status else ''}: {text[:300]}\n"
+            f"{page_flow.cdp_refusal_hint(text)}")
+    try:
+        contexts = await asyncio.wait_for(
+            connection.send("Target.getBrowserContexts"),
+            max(1.0, deadline - loop.time()))
+    except asyncio.TimeoutError:
+        await connection.dispose()
+        raise RuntimeError(
+            f"could not connect to --cdp-endpoint "
+            f"{_mask_credentials(endpoint)}: the browser did not answer"
+        ) from None
+    return await Browser.create(
+        connection, (contexts or {}).get("browserContextIds", []), True,
+        {"width": 800, "height": 600}, None,
+        lambda: connection.send("Browser.close"))
+
+
+async def _install_proxy_auth(page, username: str, password: str) -> None:
+    """Answer the proxy's 407 over the CDP `Fetch` domain.
+
+    Replaces `page.authenticate()`: pyppeteer 2.0.0 implements that with
+    `Network.setRequestInterception`, which current Chromium no longer has
+    ("'Network.setRequestInterception' wasn't found"), so a proxy with a
+    login crashed the run before the first request (report of 2026-11-25).
+    Ported from justjoin-scraper.
+
+    `Fetch.enable` pauses every request, so each one is continued; the
+    credentials are offered once per request and then cancelled, so a
+    refused login ends the load instead of looping.
+    """
+    client = page._client
+    answered = set()
+
+    async def send(method, params):
+        try:
+            await client.send(method, params)
+        except Exception:  # noqa: BLE001 - the page may already be gone
+            pass
+
+    def on_paused(event):
+        asyncio.ensure_future(send("Fetch.continueRequest",
+                                   {"requestId": event["requestId"]}))
+
+    def on_auth(event):
+        request_id = event["requestId"]
+        from_proxy = (event.get("authChallenge") or {}).get("source") == "Proxy"
+        if from_proxy and request_id not in answered:
+            answered.add(request_id)
+            response = {"response": "ProvideCredentials",
+                        "username": username, "password": password}
+        else:
+            response = {"response": "CancelAuth" if from_proxy else "Default"}
+        asyncio.ensure_future(send("Fetch.continueWithAuth", {
+            "requestId": request_id, "authChallengeResponse": response}))
+
+    client.on("Fetch.requestPaused", on_paused)
+    client.on("Fetch.authRequired", on_auth)
+    await client.send("Fetch.enable", {"handleAuthRequests": True,
+                                       "patterns": [{"urlPattern": "*"}]})
+
+
 def _chrome_ua(version: str) -> str:
     """A desktop-Chrome UA naming the browser's OWN real version.
 
@@ -302,8 +406,8 @@ class _Session:
             # authenticated Scraping Browser endpoint works here — unlike
             # Selenium's debuggerAddress, which has nowhere to put a password.
             self.browser = self.bridge.run(
-                connect(browserWSEndpoint=self.args.cdp_endpoint,
-                        ignoreHTTPSErrors=True), timeout=CONNECT_TIMEOUT)
+                _connect_cdp(self.args.cdp_endpoint),
+                timeout=CONNECT_TIMEOUT + 5)
             self.page = self.bridge.run(self.browser.newPage())
             return self
 
@@ -316,7 +420,7 @@ class _Session:
         credentials = None
         if self.pool:
             exit_url = self.pool.current
-            # Credentials go through page.authenticate(), never onto the
+            # Credentials go over CDP (_install_proxy_auth), never onto the
             # command line: --proxy-server= becomes part of the browser's
             # argv, readable by anything that can run `ps`.
             scrubbed, credentials = split_credentials(exit_url)
@@ -339,8 +443,8 @@ class _Session:
         self.bridge.run(self.page.setUserAgent(_chrome_ua(version)))
         self.bridge.run(self.page.setViewport({"width": 1600, "height": 1000}))
         if credentials:
-            self.bridge.run(self.page.authenticate(
-                {"username": credentials[0], "password": credentials[1]}))
+            self.bridge.run(_install_proxy_auth(
+                self.page, credentials[0], credentials[1]))
         return self
 
     def relaunch(self):
@@ -355,7 +459,11 @@ class _Session:
     def close(self):
         try:
             if self.remote:
+                # Our tab only, then DISCONNECT: Browser.close() would shut
+                # the remote browser down, and leaving the socket open is
+                # what printed "Event loop is closed" after every CDP run.
                 self.bridge.run(self.page.close(), timeout=30)
+                self.bridge.run(self.browser.disconnect(), timeout=30)
             else:
                 self.bridge.run(self.browser.close(), timeout=30)
         except Exception as e:  # noqa: BLE001
@@ -419,17 +527,16 @@ def _content(session) -> Optional[str]:
     return _driver(session)["content"]()
 
 
-def _parse_for_mode(html: str, url: str, args, page_num: int = 1,
-                    boundaries: Optional[List[int]] = None) -> List:
-    # `boundaries` is how a run that scrolled ONE long page still reports a
-    # meaningful `page` per row: the card count after each scroll round, so a
-    # car at position 47 is known to have arrived in batch 3. Without it
-    # every row is page 1 and `page`+`position` stops identifying a row.
-    # Mirrors playwright_scraper._parse_for_mode exactly.
+def _parse_for_mode(html: str, url: str, args, page_num: int = 1) -> List:
+    """Rows for this mode, always as a list even when the mode yields one.
+
+    `page` and `position` are final only after the merge: output_writer.
+    finish_run numbers the deduplicated rows 1..N and sets `page` to the
+    batch of 20 each falls in, the same unit as --pages.
+    """
     if args.mode == "detail":
         return parse_detail_page(html, url, category=args.category)
-    return parse_products(html, url, page=page_num, category=args.category,
-                          page_boundaries=boundaries)
+    return parse_products(html, url, page=page_num, category=args.category)
 
 
 def _same_url(a: str, b: str) -> bool:
@@ -522,6 +629,11 @@ def handle_captcha_if_present(session, args, budget=None) -> bool:
                     configured["version"],
                     " enterprise" if configured["enterprise"] == "true" else "",
                     configured["sitekey"] or "(explicit)")
+    why_not = unsupported_solve(challenge, configured)
+    if why_not:
+        logger.info("%s detected via %s — %s", challenge.kind,
+                    challenge.source, why_not)
+        return False
     logger.warning("%s detected via %s (sitekey=%s) — attempting to solve.",
                    challenge.kind, challenge.source, challenge.sitekey)
     if not args.twocaptcha_key:
@@ -803,8 +915,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         html = d["content"]() or html
 
     if args.dump_html:
-        dump_path = (args.dump_html if args.pages == 1
-                     else f"{args.dump_html}.page{page_num}")
+        # Always the path given: a run fetches ONE page whatever --pages
+        # says (a listing grows by scrolling), so a `.page1` suffix only hid
+        # the file from the name that was asked for.
+        dump_path = args.dump_html
         with open(dump_path, "w", encoding="utf-8") as f:
             f.write(html)
         logger.info("Saved the snapshot the parser sees to %s (%d bytes).",
@@ -833,12 +947,6 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                      "(exit 4).", vendor, len(html), debug_html)
         outcome.blocked_by = vendor
         return outcome
-
-    # The scroll's record of the card count after each round is what lets a
-    # run that scrolled ONE long page still report a meaningful `page` per
-    # row. Without it every row is page 1 and `page`+`position` stops
-    # identifying a row.
-    boundaries = (outcome.scroll or {}).get("boundaries")
     # Through the POLICY rather than unconditionally. `STATE_POLICY` is the
     # one place that says which states are worth reading, and until now
     # nothing consulted its `parse` column: the engines parsed whatever
@@ -855,8 +963,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # Measured across the family on 2026-09-23 by counting definitions
     # against readers: 7 of 24 repos defined `should_parse` and none of
     # them called it.
-    products = (_parse_for_mode(html, page.url, args, page_num,
-                                boundaries=boundaries)
+    products = (_parse_for_mode(html, page.url, args, page_num)
                 if page_flow.should_parse(state) else [])
     logger.info("Parsed %d row(s) from page %d.", len(products), page_num)
 
@@ -990,7 +1097,7 @@ def scrape(args) -> int:
         # The tripwire for the assumption this whole engine rests on. False
         # for every URL on this site today; if a deploy ever makes it True,
         # this says so loudly and names what to bring back.
-        if page_flow.pagination_is_addressable(
+        if outcome.ok and page_flow.pagination_is_addressable(
                 outcome.final_url or args.url,
                 _advertised_next_hrefs(session)):
             logger.warning(
@@ -1005,11 +1112,13 @@ def scrape(args) -> int:
 
     all_rows = []
     merged_seen = set()
+    dropped = 0
     for oc in sorted(outcomes, key=lambda o: o.page_num):
         fresh = dedupe_by_key(oc.products, merged_seen, key=dedupe_key)
         if len(fresh) < len(oc.products):
             logger.info("Dropped %d duplicate row(s) by %s.",
                         len(oc.products) - len(fresh), dedupe_key)
+        dropped += len(oc.products) - len(fresh)
         all_rows.extend(fresh)
 
     # THE RUN STATUS, decided after the merge because one of its cases needs
@@ -1022,7 +1131,8 @@ def scrape(args) -> int:
         stop_reason = "single_page_mode"
     else:
         stop_reason = page_flow.listing_stop_reason(
-            outcome.scroll, outcome.completeness, len(all_rows))
+            outcome.scroll, outcome.completeness, len(all_rows),
+            state=outcome.state)
 
     ok_pages = [o for o in outcomes if o.ok]
     failed_pages = [o.page_num for o in outcomes if not o.ok]
@@ -1068,7 +1178,7 @@ def scrape(args) -> int:
                       pages_failed=failed_pages, mode=args.mode,
                       source=site_host(final_url),
                       start_url=args.url, final_url=final_url,
-                      extra=extra)
+                      extra=extra, duplicates_dropped=dropped)
 
 
 def parse_args():
@@ -1116,7 +1226,7 @@ def parse_args():
     p.add_argument("--out", default="spinny_products", help="Output file prefix")
     p.add_argument("--proxy", default=None,
                    help="Proxy URL, e.g. http://ACCOUNT:PASSWORD@HOST:9999. "
-                        "Credentials are sent over CDP (page.authenticate), "
+                        "Credentials are sent over CDP (Fetch.authRequired), "
                         "never on the browser's command line.")
     p.add_argument("--proxy-file", default=None,
                    help="File with one proxy URL per line to rotate across. "
@@ -1126,7 +1236,10 @@ def parse_args():
     p.add_argument("--proxy-block-retries", type=page_flow.block_retries_arg, default=2)
     p.add_argument("--twocaptcha-key", default=None, help="2captcha.com API key")
     p.add_argument("--allow-empty", action="store_true",
-                   help="Write output files even when 0 rows were found.")
+                   help="Write the (empty) output files when a FINISHED run found 0 "
+                        "rows — a filter nothing matches (exit 4). A blocked run or one "
+                        "that never got its page (exit 3/5) leaves earlier output "
+                        "untouched with or without this flag.")
     p.add_argument("--captcha-api", choices=["v2", "v1"], default="v2")
     p.add_argument("--solve-captcha", choices=["when-blocked", "always"],
                    default="when-blocked",
@@ -1138,7 +1251,12 @@ def parse_args():
                         "every page it serves — it SCORES the session rather "
                         "than challenging it — and no rendered challenge has "
                         "ever been observed.")
-    p.add_argument("--min-score", type=float, default=0.7)
+    p.add_argument("--min-score", type=float, choices=(0.3, 0.7, 0.9),
+                   default=0.7,
+                   help="reCAPTCHA v3 minimum score to request: 0.3, 0.7 or "
+                        "0.9, the three the API accepts. Has no effect on "
+                        "Spinny, where no solve is bought (its widget is "
+                        "reCAPTCHA Enterprise).")
     p.add_argument("--cdp-endpoint", default=None,
                    help="Connect to a running browser over CDP, e.g. "
                         "ws://user:pass@host:port. pyppeteer authenticates on "
@@ -1179,7 +1297,7 @@ def parse_args():
         if why:
             # Named WITH THE REASON: "is not a Spinny site" would be false
             # for api.spinny.com and sends the reader hunting for a typo.
-            p.error(f"{site_host(args.url)} {why}.")
+            p.error(f"{site_host(args.url) or args.url!r} {why}.")
         p.error(f"{site_host(args.url) or args.url!r} is not Spinny. This "
                 f"scraper reads www.spinny.com, the site's only "
                 f"storefront — one country, one language, one currency, no "
@@ -1230,6 +1348,11 @@ def parse_args():
     page_warning = page_flow.page_param_warning(args.url)
     if page_warning:
         logger.warning("%s", page_warning)
+    usage_error, usage_warnings = page_flow.check_args(args)
+    if usage_error:
+        p.error(usage_error)
+    for warning in usage_warnings:
+        logger.warning("%s", warning)
     return args
 
 

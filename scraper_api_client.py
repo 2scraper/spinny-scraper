@@ -72,7 +72,6 @@ Requires: pip install -r requirements.txt
 import argparse
 import json
 import logging
-import os
 import re
 import sys
 import time
@@ -81,8 +80,9 @@ from typing import Optional
 import requests
 
 from product_parser import (parse_products, detect_bot_challenge,
-                            detect_page_state)
-from output_writer import save
+                            detect_page_state, is_supported_host,
+                            listing_kind, site_host, unsupported_reason)
+from output_writer import EXIT_FETCH_FAILED, EXIT_NO_PRODUCTS, save
 import env_config
 import page_flow
 
@@ -284,7 +284,7 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
     # case, because this site's refusal has no marker to detect.
     state = detect_page_state(html, status=upstream_status, url=args.url)
     if state == "blocked":
-        dump = f"{args.out}_scraperapi_debug.html"
+        dump = f"{args.out}_debug.html"
         with open(dump, "w", encoding="utf-8") as f:
             f.write(html)
         logger.error(
@@ -315,12 +315,29 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
     logger.info("Parsed %d products.", len(products))
 
     if not products:
-        dump = f"{args.out}_scraperapi_debug.html"
+        # `--out` already ends in "_scraperapi" by default, so the dump is
+        # just `<out>_debug.html` — not `..._scraperapi_scraperapi_debug.html`.
+        dump = f"{args.out}_debug.html"
         with open(dump, "w", encoding="utf-8") as f:
             f.write(html)
         logger.warning("0 products parsed — saved the raw response to %s so you can see "
                        "what actually came back.", dump)
-        return 4
+        if state == "empty":
+            # Spinny's own answer of nothing — a zero-count heading, a
+            # cityless URL, the /used-cars/ landing page. The one case where
+            # --allow-empty writes the empty files.
+            if args.allow_empty:
+                save([], args.out, args.format, allow_empty=True)
+            return EXIT_NO_PRODUCTS
+        # Anything else with no cars is the listing NOT obtained: the shell
+        # Spinny serves before its XHR fills the grid, which is what a single
+        # fetch gets. Exit 5, not 4 — nothing was learned about the listing
+        # — and --allow-empty does not apply.
+        logger.error("The page came back as %r with no cars on it: the listing "
+                     "was not obtained (exit %d). A Spinny listing fills its "
+                     "grid by XHR after load and by scrolling; use "
+                     "playwright_scraper.py.", state, EXIT_FETCH_FAILED)
+        return EXIT_FETCH_FAILED
 
     return save(products, args.out, args.format, allow_empty=args.allow_empty)
 
@@ -337,7 +354,7 @@ def parse_args():
     # NOT required: prefer the TWOCAPTCHA_KEY env var. A key passed on the
     # command line is visible to anyone who can run `ps`, and it lands in
     # shell history and in any log that echoes the command line.
-    p.add_argument("--key", default=os.environ.get("TWOCAPTCHA_KEY"),
+    p.add_argument("--key", default=None,
                    help="2captcha.com API key (sent as a Bearer token). "
                         "Defaults to $TWOCAPTCHA_KEY, which is the safer way to pass it.")
     p.add_argument("--url", default=None,
@@ -364,8 +381,10 @@ def parse_args():
     wait.add_argument("--wait-state", choices=["load", "domcontentloaded"], default=None,
                       help="Wait for a page load state instead of specific content")
     p.add_argument("--allow-empty", action="store_true",
-                   help="Write output files even when 0 products were parsed. Off by "
-                        "default so a failed fetch can't overwrite a good result.")
+                   help="Write the (empty) output files when Spinny answers "
+                        "with an empty listing (exit 4). A page that came "
+                        "back without its grid (exit 5) or blocked (exit 3) "
+                        "never overwrites earlier output.")
     p.add_argument("--retries", type=page_flow.numeric_type("--retries", int, 0, "a whole number"), default=1,
                    help="Extra attempts if a bot-challenge page comes back. One retry is "
                         "usually worth it. Each attempt is a separate billable task, so "
@@ -385,6 +404,18 @@ def parse_args():
     if not args.url:
         p.error("no --url given, and SPINNY_URL is not set in the environment "
                 "or in .env.")
+    # The same refusals as the browser engines, BEFORE the first billed
+    # call: ftp://, a foreign host or a URL with no scheme used to be sent
+    # to the paid API as they were.
+    if not is_supported_host(args.url):
+        p.error(f"{site_host(args.url) or args.url!r} "
+                f"{unsupported_reason(args.url) or 'is not Spinny'}.")
+    if listing_kind(args.url) == "detail":
+        p.error(f"{args.url!r} is a single car page; this client reads "
+                f"listings. Use playwright_scraper.py --mode detail.")
+    usage_error, _ = page_flow.check_args(args)
+    if usage_error:
+        p.error(usage_error)
     return args
 
 
